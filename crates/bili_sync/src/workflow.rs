@@ -461,6 +461,7 @@ pub async fn fetch_page_video(
     if !should_run {
         return Ok(());
     }
+    /* 不下载视频
     let bili_video = Video::new(bili_client, video_model.bvid.clone());
     let streams = bili_video
         .get_page_analyzer(page_info)
@@ -494,6 +495,7 @@ pub async fn fetch_page_video(
             res?;
         }
     }
+    */
     Ok(())
 }
 
