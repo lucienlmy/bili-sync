@@ -568,7 +568,7 @@ pub async fn fetch_page_video(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
-    let bili_video = Video::new(bili_client, video_model.bvid.clone());
+   /*  let bili_video = Video::new(bili_client, video_model.bvid.clone());
     let streams = bili_video
         .get_page_analyzer(page_info)
         .await?
@@ -587,7 +587,7 @@ pub async fn fetch_page_video(
                 .multi_fetch_and_merge(&video_stream.urls(), &audio_stream.urls(), page_path)
                 .await?
         }
-    }
+    } */
     Ok(ExecutionStatus::Succeeded)
 }
 
