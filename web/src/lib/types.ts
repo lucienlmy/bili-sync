@@ -266,6 +266,7 @@ export interface SkipOption {
 	no_poster: boolean;
 	no_video_nfo: boolean;
 	no_video: boolean;
+	no_overwrite: boolean;
 	no_upper: boolean;
 	no_danmaku: boolean;
 	no_subtitle: boolean;

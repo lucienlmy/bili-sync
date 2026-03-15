@@ -66,6 +66,8 @@ pub struct SkipOption {
     pub no_video_nfo: bool,
     #[serde(default)]
     pub no_video: bool,
+    #[serde(default)]
+    pub no_overwrite: bool,
     pub no_upper: bool,
     pub no_danmaku: bool,
     pub no_subtitle: bool,

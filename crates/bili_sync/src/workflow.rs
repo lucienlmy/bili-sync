@@ -576,6 +576,12 @@ pub async fn fetch_page_poster(
             None => video_model.cover.as_str(),
         }
     };
+    if cx.config.skip_option.no_overwrite {
+        if fs::metadata(&poster_path).await.is_ok() {
+            return Ok(ExecutionStatus::Skipped);
+        }
+    }
+
     cx.downloader
         .fetch(url, &poster_path, &cx.config.concurrent_limit.download)
         .await?;
@@ -595,6 +601,12 @@ pub async fn fetch_page_video(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
+    if cx.config.skip_option.no_overwrite {
+        if tokio::fs::metadata(page_path).await.is_ok() {
+            return Ok(ExecutionStatus::Skipped);
+        }
+    }
+
     let bili_video = Video::new(cx.bili_client, video_model.bvid.clone(), &cx.config.credential);
     let streams = bili_video
         .get_page_analyzer(page_info)
@@ -649,6 +661,12 @@ pub async fn fetch_page_danmaku(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
+    if cx.config.skip_option.no_overwrite {
+        if fs::metadata(&danmaku_path).await.is_ok() {
+            return Ok(ExecutionStatus::Skipped);
+        }
+    }
+
     let bili_video = Video::new(cx.bili_client, video_model.bvid.clone(), &cx.config.credential);
     bili_video
         .get_danmaku_writer(page_info)
@@ -674,6 +692,11 @@ pub async fn fetch_page_subtitle(
         .into_iter()
         .map(|subtitle| async move {
             let path = subtitle_path.with_extension(format!("{}.srt", subtitle.lan));
+            if cx.config.skip_option.no_overwrite {
+                if tokio::fs::metadata(&path).await.is_ok() {
+                    return Ok(());
+                }
+            }
             tokio::fs::write(path, subtitle.body.to_string()).await
         })
         .collect::<FuturesUnordered<_>>();
@@ -697,7 +720,7 @@ pub async fn generate_page_nfo(
     } else {
         NFO::Episode(page_model.to_nfo(cx.config.nfo_time_type))
     };
-    generate_nfo(nfo, nfo_path).await?;
+    generate_nfo(nfo, nfo_path, cx.config.skip_option.no_overwrite).await?;
     Ok(ExecutionStatus::Succeeded)
 }
 
@@ -711,6 +734,12 @@ pub async fn fetch_video_poster(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
+    if cx.config.skip_option.no_overwrite {
+        if fs::metadata(&poster_path).await.is_ok() {
+            return Ok(ExecutionStatus::Skipped);
+        }
+    }
+
     cx.downloader
         .fetch(&video_model.cover, &poster_path, &cx.config.concurrent_limit.download)
         .await?;
@@ -727,6 +756,12 @@ pub async fn fetch_upper_face(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
+    if cx.config.skip_option.no_overwrite {
+        if fs::metadata(&upper_face_path).await.is_ok() {
+            return Ok(ExecutionStatus::Skipped);
+        }
+    }
+
     cx.downloader
         .fetch(
             &video_model.upper_face,
@@ -746,7 +781,7 @@ pub async fn generate_upper_nfo(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
-    generate_nfo(NFO::Upper(video_model.to_nfo(cx.config.nfo_time_type)), nfo_path).await?;
+    generate_nfo(NFO::Upper(video_model.to_nfo(cx.config.nfo_time_type)), nfo_path, cx.config.skip_option.no_overwrite).await?;
     Ok(ExecutionStatus::Succeeded)
 }
 
@@ -759,12 +794,17 @@ pub async fn generate_video_nfo(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
-    generate_nfo(NFO::TVShow(video_model.to_nfo(cx.config.nfo_time_type)), nfo_path).await?;
+    generate_nfo(NFO::TVShow(video_model.to_nfo(cx.config.nfo_time_type)), nfo_path, cx.config.skip_option.no_overwrite).await?;
     Ok(ExecutionStatus::Succeeded)
 }
 
 /// 创建 nfo_path 的父目录，然后写入 nfo 文件
-async fn generate_nfo(nfo: NFO<'_>, nfo_path: PathBuf) -> Result<()> {
+async fn generate_nfo(nfo: NFO<'_>, nfo_path: PathBuf, no_overwrite: bool) -> Result<()> {
+    if no_overwrite {
+        if fs::metadata(&nfo_path).await.is_ok() {
+            return Ok(());
+        }
+    }
     if let Some(parent) = nfo_path.parent() {
         fs::create_dir_all(parent).await?;
     }

@@ -641,6 +641,10 @@
 						<Label>处理跳过选项</Label>
 						<p class="text-muted-foreground text-sm">在视频处理部分跳过某些执行环节</p>
 						<div class="flex items-center space-x-2">
+							<Switch id="no-overwrite" bind:checked={formData.skip_option.no_overwrite} />
+							<Label for="no-overwrite">下载时不覆盖已存在的文件</Label>
+						</div>
+						<div class="flex items-center space-x-2">
 							<Switch id="skip-poster" bind:checked={formData.skip_option.no_poster} />
 							<Label for="skip-poster">跳过视频封面</Label>
 						</div>
