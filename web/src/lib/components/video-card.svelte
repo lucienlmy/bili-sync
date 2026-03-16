@@ -17,6 +17,7 @@
 	} from '@lucide/svelte/icons';
 	import { goto } from '$app/navigation';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
+	import api from '$lib/api';
 
 	// 将 bvid 设置为可选属性，但保留 VideoInfo 的其它所有属性
 	export let video: Omit<VideoInfo, 'bvid'> & { bvid?: string };
@@ -34,6 +35,64 @@
 	export let clearAndResetting = false;
 
 	let forceReset = false;
+
+	export let deleteMode: boolean = false; // 删除模式
+	export let onDelete: (() => Promise<void>) | null = null; // 删除回调
+	export let deleting = false;
+
+	export let isDKeyPressed: boolean = false; // D 键是否按下
+
+// 本组件局部的删除确认对话框状态，避免全局 deleteMode 导致所有卡片同时弹窗
+let confirmDeleteOpen = false;
+let dbModalOpen = false;
+let dbLoading = false;
+let dbVideo: any = null;
+let editedVideoStatus: number[] = [];
+let editedPageStatuses: Record<number, number[]> = {};
+
+async function openDbModal() {
+	dbModalOpen = true;
+	dbLoading = true;
+	try {
+		const res = await api.getVideo(video.id);
+		dbVideo = res.data.video ? { ...res.data.video } : null;
+		// copy download_status arrays for editing
+		if (dbVideo) {
+			editedVideoStatus = Array.isArray(dbVideo.download_status) ? [...dbVideo.download_status] : [];
+		}
+		if (res.data.pages) {
+			editedPageStatuses = {};
+			res.data.pages.forEach((p: any) => {
+				editedPageStatuses[p.id] = Array.isArray(p.download_status) ? [...p.download_status] : [];
+			});
+		}
+	} catch (e) {
+		console.error('fetch video failed', e);
+		dbVideo = null;
+	} finally {
+		dbLoading = false;
+	}
+}
+
+async function saveDbEdits() {
+	if (!dbVideo) return;
+	const video_updates = editedVideoStatus.map((v, idx) => ({ status_index: idx, status_value: v }));
+	const page_updates = Object.entries(editedPageStatuses).map(([page_id, statuses]) => ({
+		page_id: Number(page_id),
+		updates: statuses.map((v, idx) => ({ status_index: idx, status_value: v }))
+	}));
+	try {
+		dbLoading = true;
+		await api.updateVideoStatus(dbVideo.id, { video_updates, page_updates });
+		// refresh local
+		await openDbModal();
+	} catch (e) {
+		console.error('save failed', e);
+		alert('保存失败：' + (e?.message || e));
+	} finally {
+		dbLoading = false;
+	}
+}
 
 	function getStatusText(status: number): string {
 		if (status === 7) {
@@ -118,6 +177,16 @@
 		clearAndResetDialogOpen = false;
 	}
 
+	async function handleDelete() {
+		deleting = true;
+		if (onDelete) {
+			await onDelete();
+		}
+		deleting = false;
+		// 关闭本地确认对话框（防止全局 deleteMode 导致其他不期望行为）
+		confirmDeleteOpen = false;
+	}
+
 	function handleViewDetail() {
 		goto(`/video/${video.id}`);
 	}
@@ -142,12 +211,36 @@
 			>
 				{displayTitle}
 			</CardTitle>
-			<Badge
-				variant="secondary"
-				class="shrink-0 px-2 py-1 text-xs font-medium {overallStatus.style} "
-			>
-				{overallStatus.text}
-			</Badge>
+			<div class="flex items-center gap-2 shrink-0">
+				{#if deleteMode}
+					<button
+						onclick={() => (confirmDeleteOpen = true)}
+						disabled={deleting}
+						class="text-destructive hover:text-destructive/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors transition-transform duration-200 ease-out transform border border-destructive/60 p-1.5 rounded-md hover:scale-125 hover:-translate-y-1 hover:rotate-6 hover:shadow-lg active:scale-95"
+						title="删除视频"
+					>
+						<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+							<path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/>
+						</svg>
+					</button>
+				{:else}
+					<Badge
+						variant="secondary"
+						class="shrink-0 px-2 py-1 text-xs font-medium {overallStatus.style} "
+					>
+						{overallStatus.text}
+					</Badge>
+				{/if}
+
+				<!-- 数据库详情按钮 -->
+				<button
+					class="ml-2 text-muted-foreground hover:text-primary transition-colors p-1.5 rounded-md"
+					title="数据库详情"
+					onclick={openDbModal}
+				>
+					<InfoIcon class="h-4 w-4" />
+				</button>
+			</div>
 		</div>
 		{#if displaySubtitle}
 			<div class="text-muted-foreground mt-1.5 flex min-w-0 items-center gap-1 text-sm">
@@ -190,7 +283,7 @@
 				</div>
 			{/if}
 
-			{#if showActions && mode === 'default'}
+			{#if showActions && mode === 'default' && !deleteMode}
 				<div class="flex min-w-0 gap-2 pt-1">
 					<Button
 						size="sm"
@@ -289,6 +382,105 @@
 	</AlertDialog.Content>
 </AlertDialog.Root>
 
+<!-- 数据库详情对话框 -->
+<AlertDialog.Root bind:open={dbModalOpen}>
+	<AlertDialog.Content class="max-w-4xl w-full">
+		<AlertDialog.Header>
+			<AlertDialog.Title>数据库：视频详情 - {video.id}</AlertDialog.Title>
+			<AlertDialog.Description>
+				在此可以查看并修改视频/分页的下载状态（仅状态字段会被保存）。
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+
+		<div class="py-4">
+			{#if dbLoading}
+				<div class="text-center py-8">加载中...</div>
+			{:else}
+				{#if dbVideo}
+					<div class="space-y-4">
+						<div class="overflow-x-auto">
+							<table class="w-full text-sm">
+								<thead>
+									<tr class="text-left text-xs text-muted-foreground">
+										<th class="px-2 py-1">字段</th>
+										<th class="px-2 py-1">值</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr>
+										<td class="px-2 py-1">id</td>
+										<td class="px-2 py-1">{dbVideo.id}</td>
+									</tr>
+									<tr>
+										<td class="px-2 py-1">bvid</td>
+										<td class="px-2 py-1">{dbVideo.bvid}</td>
+									</tr>
+									<tr>
+										<td class="px-2 py-1">name</td>
+										<td class="px-2 py-1">{dbVideo.name}</td>
+									</tr>
+									<tr>
+										<td class="px-2 py-1">path</td>
+										<td class="px-2 py-1">{dbVideo.path}</td>
+									</tr>
+									<tr>
+										<td class="px-2 py-1">should_download</td>
+										<td class="px-2 py-1">{dbVideo.should_download ? 'true' : 'false'}</td>
+									</tr>
+									<tr>
+										<td class="px-2 py-1">valid</td>
+										<td class="px-2 py-1">{dbVideo.valid ? 'true' : 'false'}</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+
+						<div>
+							<h4 class="text-sm font-medium mb-2">视频任务状态</h4>
+							<div class="grid grid-cols-5 gap-2">
+								{#each editedVideoStatus as status, idx}
+									<div class="p-2 border rounded-md">
+										<div class="text-xs text-muted-foreground mb-1">{getTaskName(idx)}</div>
+										<input class="w-full rounded border px-2 py-1" type="number" bind:value={editedVideoStatus[idx]} />
+									</div>
+								{/each}
+							</div>
+						</div>
+
+						<div>
+							<h4 class="text-sm font-medium mb-2">分页状态</h4>
+							<div class="space-y-3">
+								{#each Object.entries(editedPageStatuses) as [pid, statuses]}
+									<div class="p-3 border rounded-md">
+										<div class="text-sm font-medium mb-2">分页 id: {pid}</div>
+										<div class="grid grid-cols-5 gap-2">
+											{#each statuses as s, si}
+												<div class="p-2 border rounded-md">
+													<div class="text-xs text-muted-foreground mb-1">{getTaskName(si)}</div>
+													<input class="w-full rounded border px-2 py-1" type="number" bind:value={editedPageStatuses[Number(pid)][si]} />
+												</div>
+											{/each}
+										</div>
+									</div>
+								{/each}
+							</div>
+						</div>
+					</div>
+				{:else}
+					<div class="text-center text-muted-foreground">无法加载视频数据</div>
+				{/if}
+			{/if}
+		</div>
+
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel on:click={() => (dbModalOpen = false)}>关闭</AlertDialog.Cancel>
+			<AlertDialog.Action on:click={saveDbEdits} disabled={dbLoading}>
+				保存更改
+			</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
+
 <!-- 清空重置确认对话框 -->
 <AlertDialog.Root bind:open={clearAndResetDialogOpen}>
 	<AlertDialog.Content>
@@ -319,6 +511,48 @@
 				class="bg-destructive hover:bg-destructive/90"
 			>
 				{clearAndResetting ? '清空重置中...' : '确认清空重置'}
+			</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
+
+
+<!-- 删除确认对话框（仅对当前卡片控制） -->
+<AlertDialog.Root bind:open={confirmDeleteOpen}>
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>删除视频</AlertDialog.Title>
+			<AlertDialog.Description>
+				确定要删除视频 <strong>"{displayTitle}"</strong> 吗？
+				<br />
+				<br />
+				此操作会：
+				<ul class="mt-2 ml-4 list-disc space-y-1">
+					<li>删除数据库中的视频记录</li>
+					<li>删除所有分页信息</li>
+					{#if isDKeyPressed}
+						<li class="text-destructive font-medium">删除视频对应的文件夹</li>
+					{:else}
+						<li class="text-yellow-600">保留视频对应的文件夹</li>
+					{/if}
+				</ul>
+				<br />
+				该操作<span class="text-destructive font-medium">无法撤销</span>。
+				{#if !isDKeyPressed}
+					<br />
+					<span class="text-xs text-muted-foreground">按住 D 键点击删除可同时删除文件夹</span>
+				{/if}
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel>取消</AlertDialog.Cancel>
+			<AlertDialog.Action
+				onclick={handleDelete}
+				disabled={deleting}
+				class="bg-destructive hover:bg-destructive/90"
+			>
+				{deleting ? '删除中...' : '确认删除'}
 			</AlertDialog.Action>
 		</AlertDialog.Footer>
 	</AlertDialog.Content>

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use axum::extract::{Extension, Path, Query};
-use axum::routing::{get, post};
+use axum::routing::{get, post, delete};
 use axum::{Json, Router};
 use bili_sync_entity::*;
 use sea_orm::ActiveValue::Set;
@@ -29,6 +29,7 @@ pub(super) fn router() -> Router {
     Router::new()
         .route("/videos", get(get_videos))
         .route("/videos/{id}", get(get_video))
+        .route("/videos/{id}", delete(delete_video))
         .route(
             "/videos/{id}/clear-and-reset-status",
             post(clear_and_reset_video_status),
@@ -104,6 +105,32 @@ pub async fn get_video(
         video: video_info,
         pages: pages_info,
     }))
+}
+
+pub async fn delete_video(
+    Path(id): Path<i32>,
+    Extension(db): Extension<DatabaseConnection>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<ApiResponse<bool>, ApiError> {
+    let video = video::Entity::find_by_id(id).one(&db).await?;
+    let Some(video) = video else {
+        return Err(InnerApiError::NotFound(id).into());
+    };
+    let delete_folder = params.get("delete_folder").map(|v| v == "true").unwrap_or(false);
+    let txn = db.begin().await?;
+    // 删除所有分页
+    page::Entity::delete_many()
+        .filter(page::Column::VideoId.eq(id))
+        .exec(&txn)
+        .await?;
+    // 删除视频
+    video::Entity::delete_by_id(id).exec(&txn).await?;
+    txn.commit().await?;
+    // 只在 delete_folder 为 true 时删除本地文件夹
+    if delete_folder {
+        let _ = tokio::fs::remove_dir_all(&video.path).await;
+    }
+    Ok(ApiResponse::ok(true))
 }
 
 pub async fn reset_video_status(

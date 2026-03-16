@@ -37,6 +37,7 @@
 	import DropdownFilter, { type Filter } from '$lib/components/dropdown-filter.svelte';
 	import SearchBar from '$lib/components/search-bar.svelte';
 	import FilteredStatusEditor from '$lib/components/filtered-status-editor.svelte';
+	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import StatusFilter from '$lib/components/status-filter.svelte';
 	import ValidationFilter from '$lib/components/validation-filter.svelte';
 
@@ -54,6 +55,22 @@
 
 	let updateAllDialogOpen = false;
 	let updatingAll = false;
+
+	let deleteMode = false;
+
+	let isDKeyPressed = false;
+
+	function handleKeyDown(e: KeyboardEvent) {
+		if (e.key.toLowerCase() === 'd') {
+			isDKeyPressed = true;
+		}
+	}
+
+	function handleKeyUp(e: KeyboardEvent) {
+		if (e.key.toLowerCase() === 'd') {
+			isDKeyPressed = false;
+		}
+	}
 
 	let videoSources: VideoSourcesResponse | null = null;
 	let filters: Record<string, Filter> | null = null;
@@ -320,11 +337,27 @@
 	$: totalPages = videosData ? Math.ceil(videosData.total_count / pageSize) : 0;
 	$: hasFilters = hasActiveFilters($appStateStore);
 	$: filterDescriptionParts = videoSources && $appStateStore && getFilterDescriptionParts();
+
+	async function handleDeleteVideo(id: number) {
+		try {
+			await api.deleteVideo(id, isDKeyPressed);
+			toast.success(isDKeyPressed ? '删除成功（包括文件夹）' : '删除成功（保留文件夹）');
+			const { query, currentPage, videoSource, statusFilter, validationFilter } = $appStateStore;
+			await loadVideos(query, currentPage, videoSource, statusFilter, validationFilter);
+		} catch (error) {
+			console.error('删除失败：', error);
+			toast.error('删除失败', {
+				description: (error as ApiError).message
+			});
+		}
+	}
 </script>
 
 <svelte:head>
 	<title>主页 - Bili Sync</title>
 </svelte:head>
+
+<svelte:window on:keydown={handleKeyDown} on:keyup={handleKeyUp} />
 
 <div class="mb-4 flex items-center justify-between">
 	<SearchBar
@@ -400,6 +433,21 @@
 			</div>
 		</div>
 		<div class="flex items-center gap-2">
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					<Button
+						size="sm"
+						variant={deleteMode ? 'destructive' : 'outline'}
+						class="hover:bg-accent hover:text-accent-foreground h-8 cursor-pointer text-xs font-medium"
+						onclick={() => (deleteMode = !deleteMode)}
+					>
+						🗑️ {deleteMode ? '删除模式开启' : '删除模式'}
+					</Button>
+				</Tooltip.Trigger>
+				<Tooltip.Content>
+					<p class="text-xs">按住 D 键点击删除按钮可删除文件夹</p>
+				</Tooltip.Content>
+			</Tooltip.Root>
 			<Button
 				size="sm"
 				variant="outline"
@@ -435,11 +483,16 @@
 		{#each videosData.videos as video (video.id)}
 			<VideoCard
 				{video}
+				{deleteMode}
+				{isDKeyPressed}
 				onReset={async (forceReset: boolean) => {
 					await handleResetVideo(video.id, forceReset);
 				}}
 				onClearAndReset={async () => {
 					await handleClearAndResetVideo(video.id);
+				}}
+				onDelete={async () => {
+					await handleDeleteVideo(video.id);
 				}}
 			/>
 		{/each}

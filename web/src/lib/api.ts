@@ -163,6 +163,10 @@ class ApiClient {
 		return this.get<VideoResponse>(`/videos/${id}`);
 	}
 
+	async deleteVideo(id: number, deleteFolder: boolean = false): Promise<ApiResponse<boolean>> {
+		return this.request<boolean>(`/videos/${id}?delete_folder=${deleteFolder}`, 'DELETE');
+	}
+
 	async resetVideoStatus(
 		id: number,
 		request: ResetVideoStatusRequest
@@ -304,6 +308,8 @@ const api = {
 	getVideoSources: () => apiClient.getVideoSources(),
 	getVideos: (params?: VideosRequest) => apiClient.getVideos(params),
 	getVideo: (id: number) => apiClient.getVideo(id),
+	deleteVideo: (id: number, deleteFolder: boolean = false) =>
+		apiClient.deleteVideo(id, deleteFolder),
 	resetVideoStatus: (id: number, request: ResetVideoStatusRequest) =>
 		apiClient.resetVideoStatus(id, request),
 	clearAndResetVideoStatus: (id: number) => apiClient.clearAndResetVideoStatus(id),
