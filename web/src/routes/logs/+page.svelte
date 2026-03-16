@@ -10,6 +10,27 @@
 	let main: HTMLElement | null = null;
 	let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
+	function parseLayer(message: string): { layer: 'video' | 'page' | null; text: string } {
+		if (message.startsWith('【视频层】')) {
+			return { layer: 'video', text: message.replace('【视频层】', '').trim() };
+		}
+		if (message.startsWith('【分页层】')) {
+			return { layer: 'page', text: message.replace('【分页层】', '').trim() };
+		}
+		return { layer: null, text: message };
+	}
+
+	function getLayerClass(layer: 'video' | 'page' | null) {
+		switch (layer) {
+			case 'video':
+				return 'bg-blue-50 text-blue-700 border border-blue-100';
+			case 'page':
+				return 'bg-indigo-50 text-indigo-700 border border-indigo-100';
+			default:
+				return 'bg-transparent text-muted-foreground';
+		}
+	}
+
 	function checkScrollPosition() {
 		if (main) {
 			const { scrollTop, scrollHeight, clientHeight } = main;
@@ -62,23 +83,29 @@
 
 <div class="space-y-1">
 	{#each logs as log, index (index)}
-		<div
-			class="flex items-center gap-3 rounded-md p-1 font-mono text-xs {index % 2 === 0
-				? 'bg-muted/50'
-				: 'bg-background'}"
-		>
-			<span class="text-muted-foreground w-32 shrink-0">
-				{log.timestamp}
-			</span>
-			<Badge
-				class="w-16 shrink-0 justify-center {getLevelColor(log.level)} bg-primary/90 font-semibold"
+			{#key index}
+				{@const parsed = parseLayer(log.message)}
+			<div
+				class="flex items-center gap-3 rounded-md p-1 font-mono text-xs {index % 2 === 0
+					? 'bg-muted/50'
+					: 'bg-background'}"
 			>
-				{log.level}
-			</Badge>
-			<span class="flex-1 break-all">
-				{log.message}
-			</span>
-		</div>
+				<span class="text-muted-foreground w-32 shrink-0">
+					{log.timestamp}
+				</span>
+				<Badge
+					class="w-16 shrink-0 justify-center {getLevelColor(log.level)} bg-primary/90 font-semibold"
+				>
+					{log.level}
+				</Badge>
+				{#if parsed.layer}
+					<span class="px-2 py-0.5 rounded-md text-xs font-medium mr-2 {getLayerClass(parsed.layer)}">
+						{parsed.layer === 'video' ? '视频层' : '分页层'}
+					</span>
+				{/if}
+				<span class="flex-1 break-all">{parsed.text}</span>
+			</div>
+		{/key}
 	{/each}
 	{#if logs.length === 0}
 		<div class="text-muted-foreground py-8 text-center">暂无日志记录</div>
