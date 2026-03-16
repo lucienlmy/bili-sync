@@ -19,8 +19,8 @@ static INSTANCE: OnceCell<DownloadTaskManager> = OnceCell::const_new();
 
 /// 运行一次下载任务并退出（不启动调度器 / Web UI）
 pub async fn download_once(connection: DatabaseConnection, bili_client: Arc<BiliClient>) -> Result<()> {
-    let mut config = VersionedConfig::get().snapshot();
-    download_video(&connection, &bili_client, &mut config).await
+    let config = VersionedConfig::get().snapshot();
+    download_video(&connection, &bili_client, &config).await
 }
 
 /// 启动周期下载视频的任务
@@ -283,8 +283,8 @@ impl DownloadTaskManager {
                     next_run: None,
                 });
                 info!("开始执行本轮视频下载任务..");
-                let mut config = VersionedConfig::get().snapshot();
-                match download_video(&cx.connection, &cx.bili_client, &mut config).await {
+                let config = VersionedConfig::get().snapshot();
+                match download_video(&cx.connection, &cx.bili_client, &config).await {
                     Ok(_) => info!("本轮视频下载任务执行完毕"),
                     Err(e) => {
                         error_and_notify(
@@ -341,7 +341,7 @@ async fn check_and_refresh_credential(
 async fn download_video(
     connection: &DatabaseConnection,
     bili_client: &BiliClient,
-    config: &mut Arc<Config>,
+    config: &Arc<Config>,
 ) -> Result<()> {
     config.check().context("配置检查失败")?;
     let mixin_key = bili_client

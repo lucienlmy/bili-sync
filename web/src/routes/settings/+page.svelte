@@ -96,7 +96,8 @@
 		try {
 			const response = await api.getConfig();
 			config = response.data;
-			formData = { ...config };
+			// 深度复制 config 到 formData，确保响应式系统正确追踪
+			formData = JSON.parse(JSON.stringify(config));
 
 			// 根据 interval 的类型初始化输入框
 			if (typeof formData.interval === 'number') {
@@ -154,8 +155,9 @@
 		saving = true;
 		try {
 			let resp = await api.updateConfig(formData);
-			formData = resp.data;
-			config = { ...formData };
+			// 深度更新 formData，确保所有嵌套对象都被正确更新
+			formData = JSON.parse(JSON.stringify(resp.data));
+			config = JSON.parse(JSON.stringify(formData));
 
 			// 更新输入框显示
 			if (typeof formData.interval === 'number') {
