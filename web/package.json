@@ -46,7 +46,23 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
-		"lint": "prettier --check . && eslint ."
+		"lint": "prettier --check . && eslint .",
+		"后端构建-backend:build": "cd ../crates/bili_sync && cargo build --release",
+		"后端清理-clean:backend": "cd ../crates/bili_sync && cargo clean",
+		"一键npm和cargo:build:embed": "npm run build && npm run backend:build"
+	},
+	"scriptsDoc": {
+		"dev": "启动开发服务器（vite dev），用于本地调试，支持热重载，前端请求会被代理到本地后端 /api。",
+		"build": "生成生产构建（vite build），输出静态文件用于部署或嵌入后端。",
+		"preview": "预览构建产物（vite preview），用于模拟生产环境查看 build 输出。",
+		"prepare": "svelte-kit sync || echo ''，安装后同步 SvelteKit 相关配置（安装钩子）。",
+		"check": "运行 svelte-check 做类型/语法检查（先 sync）。",
+		"check:watch": "watch 模式下持续做 svelte-check。",
+		"format": "使用 Prettier 自动格式化代码。",
+		"lint": "先用 Prettier 检查格式，再运行 ESLint 做静态代码检查。",
+		"后端构建-backend:build": "切到后端目录并执行 'cargo build --release'，用于编译 Rust 后端二进制（中文-英文混合脚本说明）。",
+		"后端清理-clean:backend": "切到后端目录并执行 'cargo clean'，用于清除后端构建产物（target/）。",
+		"一键npm和cargo:build:embed": "先执行前端构建（build），再执行后端编译（后端构建-backend:build），用于把前端嵌入后端并生成可运行的 release 二进制。"
 	},
 	"type": "module",
 	"dependencies": {

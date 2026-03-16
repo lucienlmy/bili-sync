@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::io::ErrorKind;
 use std::pin::Pin;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -11,6 +12,13 @@ use sea_orm::TransactionTrait;
 use sea_orm::entity::prelude::*;
 use tokio::fs;
 use tokio::sync::Semaphore;
+use tokio::task;
+use crate::config::SkipOption;
+#[cfg(unix)]
+use std::os::unix::fs as unix_fs;
+#[cfg(windows)]
+use std::os::windows::fs as windows_fs;
+use std::ffi::OsStr;
 
 use crate::adapter::{VideoSource, VideoSourceEnum};
 use crate::bilibili::{BestStream, BiliClient, BiliError, Dimension, PageInfo, Video, VideoInfo};
@@ -28,6 +36,64 @@ use crate::utils::nfo::{NFO, ToNFO};
 use crate::utils::notify::notify;
 use crate::utils::rule::FieldEvaluatable;
 use crate::utils::status::{PageStatus, STATUS_OK, VideoStatus};
+
+async fn create_equivalent(src: &Path, dst: &Path, prefer_link: bool) -> Result<()> {
+    // If not preferring links, always copy
+    if !prefer_link {
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        fs::copy(src, dst).await?;
+        return Ok(());
+    }
+
+    // 1) Try hard link
+    match fs::hard_link(src, dst).await {
+        Ok(_) => return Ok(()),
+        Err(e) => {
+            if e.kind() == ErrorKind::AlreadyExists {
+                return Ok(());
+            }
+            // else fallthrough to next strategies
+        }
+    }
+
+    // 2) Try symlink
+    let symlink_res = {
+        let src_owned = src.to_path_buf();
+        let dst_owned = dst.to_path_buf();
+        task::spawn_blocking(move || -> std::io::Result<()> {
+            if let Some(parent) = dst_owned.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            #[cfg(unix)]
+            {
+                unix_fs::symlink(&src_owned, &dst_owned)?;
+                return Ok(());
+            }
+            #[cfg(windows)]
+            {
+                windows_fs::symlink_file(&src_owned, &dst_owned)?;
+                return Ok(());
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                return Err(std::io::Error::new(std::io::ErrorKind::Other, "symlink unsupported"));
+            }
+        })
+        .await
+    };
+    if let Ok(Ok(())) = symlink_res {
+        return Ok(());
+    }
+
+    // 4) Fallback to copy
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent).await?;
+    }
+    fs::copy(src, dst).await?;
+    Ok(())
+}
 
 /// 完整地处理某个视频来源
 pub async fn process_video_source(
@@ -601,7 +667,7 @@ pub async fn fetch_page_poster(
         .fetch(url, &poster_path, &cx.config.concurrent_limit.download)
         .await?;
     if let Some(fanart_path) = fanart_path {
-        fs::copy(&poster_path, &fanart_path).await?;
+        create_equivalent(&poster_path, &fanart_path, cx.config.skip_option.prefer_link_for_fanart).await?;
     }
     Ok(ExecutionStatus::Succeeded)
 }
@@ -758,7 +824,7 @@ pub async fn fetch_video_poster(
     cx.downloader
         .fetch(&video_model.cover, &poster_path, &cx.config.concurrent_limit.download)
         .await?;
-    fs::copy(&poster_path, &fanart_path).await?;
+    create_equivalent(&poster_path, &fanart_path, cx.config.skip_option.prefer_link_for_fanart).await?;
     Ok(ExecutionStatus::Succeeded)
 }
 

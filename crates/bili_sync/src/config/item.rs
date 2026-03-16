@@ -60,7 +60,7 @@ impl Default for ConcurrentLimit {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SkipOption {
     pub no_poster: bool,
     pub no_video_nfo: bool,
@@ -71,6 +71,27 @@ pub struct SkipOption {
     pub no_upper: bool,
     pub no_danmaku: bool,
     pub no_subtitle: bool,
+    #[serde(default = "default_prefer_link_for_fanart")]
+    pub prefer_link_for_fanart: bool,
+}
+
+fn default_prefer_link_for_fanart() -> bool {
+    true
+}
+
+impl Default for SkipOption {
+    fn default() -> Self {
+        Self {
+            no_poster: false,
+            no_video_nfo: false,
+            no_video: false,
+            no_overwrite: false,
+            no_upper: false,
+            no_danmaku: false,
+            no_subtitle: false,
+            prefer_link_for_fanart: default_prefer_link_for_fanart(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]

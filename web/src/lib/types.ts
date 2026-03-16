@@ -270,6 +270,7 @@ export interface SkipOption {
 	no_upper: boolean;
 	no_danmaku: boolean;
 	no_subtitle: boolean;
+	prefer_link_for_fanart?: boolean;
 }
 
 export interface RateLimit {

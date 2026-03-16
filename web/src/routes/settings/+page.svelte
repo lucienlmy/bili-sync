@@ -638,35 +638,57 @@
 					<Separator />
 
 					<div class="space-y-4">
-						<Label>处理跳过选项</Label>
-						<p class="text-muted-foreground text-sm">在视频处理部分跳过某些执行环节</p>
-						<div class="flex items-center space-x-2">
-							<Switch id="no-overwrite" bind:checked={formData.skip_option.no_overwrite} />
-							<Label for="no-overwrite">下载时不覆盖已存在的文件</Label>
-						</div>
-						<div class="flex items-center space-x-2">
-							<Switch id="skip-poster" bind:checked={formData.skip_option.no_poster} />
-							<Label for="skip-poster">跳过视频封面</Label>
-						</div>
-						<div class="flex items-center space-x-2">
-							<Switch id="skip-video-nfo" bind:checked={formData.skip_option.no_video_nfo} />
-							<Label for="skip-video-nfo">跳过视频 NFO</Label>
-						</div>
-						<div class="flex items-center space-x-2">
-							<Switch id="skip-video" bind:checked={formData.skip_option.no_video} />
-							<Label for="skip-video">跳过下载视频文件</Label>
-						</div>
-						<div class="flex items-center space-x-2">
-							<Switch id="skip-upper-info" bind:checked={formData.skip_option.no_upper} />
-							<Label for="skip-upper-info">跳过 Up 主头像、信息</Label>
-						</div>
-						<div class="flex items-center space-x-2">
-							<Switch id="skip-danmaku" bind:checked={formData.skip_option.no_danmaku} />
-							<Label for="skip-danmaku">跳过弹幕</Label>
-						</div>
-						<div class="flex items-center space-x-2">
-							<Switch id="skip-subtitle" bind:checked={formData.skip_option.no_subtitle} />
-							<Label for="skip-subtitle">跳过字幕</Label>
+						<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+							<!-- Left column: skip options (skip-video on top) -->
+							<div>
+								<Label>处理跳过选项</Label>
+								<p class="text-muted-foreground text-sm">在视频处理部分跳过某些执行环节</p>
+								<div class="space-y-2 mt-2">
+									<div class="flex items-center space-x-2">
+										<Switch id="skip-video" bind:checked={formData.skip_option.no_video} />
+										<Label for="skip-video">跳过下载视频文件</Label>
+									</div>
+									<div class="flex items-center space-x-2">
+										<Switch id="skip-poster" bind:checked={formData.skip_option.no_poster} />
+										<Label for="skip-poster">跳过视频封面</Label>
+									</div>
+									<div class="flex items-center space-x-2">
+										<Switch id="skip-video-nfo" bind:checked={formData.skip_option.no_video_nfo} />
+										<Label for="skip-video-nfo">跳过视频 NFO</Label>
+									</div>
+									<div class="flex items-center space-x-2">
+										<Switch id="skip-upper-info" bind:checked={formData.skip_option.no_upper} />
+										<Label for="skip-upper-info">跳过 Up 主头像、信息</Label>
+									</div>
+									<div class="flex items-center space-x-2">
+										<Switch id="skip-danmaku" bind:checked={formData.skip_option.no_danmaku} />
+										<Label for="skip-danmaku">跳过弹幕</Label>
+									</div>
+									<div class="flex items-center space-x-2">
+										<Switch id="skip-subtitle" bind:checked={formData.skip_option.no_subtitle} />
+										<Label for="skip-subtitle">跳过字幕</Label>
+									</div>
+								</div>
+							</div>
+
+							<!-- Right column: save strategy group -->
+							<div>
+								<Label>保存策略</Label>
+								<p class="text-muted-foreground text-sm">与保存与覆盖相关的选项</p>
+								<div class="space-y-2 mt-2">
+									<div class="flex items-center space-x-2">
+										<Switch id="no-overwrite" bind:checked={formData.skip_option.no_overwrite} />
+										<Label for="no-overwrite">下载时不覆盖已存在的文件</Label>
+									</div>
+									<div class="flex items-center space-x-2">
+										<Switch id="prefer-link-for-fanart" bind:checked={formData.skip_option.prefer_link_for_fanart} />
+										<Label for="prefer-link-for-fanart">优先使用链接保存 fanart（硬链接 → 符号链接 → 复制）</Label>
+									</div>
+									<div class="mt-1">
+										<p class="text-muted-foreground text-xs">此设置仅对保存后并在随后触发的下载生效，正在运行的任务不会回溯应用。</p>
+									</div>
+								</div>
+							</div>
 						</div>
 					</div>
 				</Tabs.Content>
