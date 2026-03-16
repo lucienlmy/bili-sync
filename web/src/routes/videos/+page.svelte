@@ -202,6 +202,32 @@
 		}
 	}
 
+	async function handleSetUncompletedVideo(id: number) {
+		try {
+			const v = await api.getVideo(id);
+			const video = v.data.video;
+			const pages = v.data.pages || [];
+			const video_updates = Array.from({ length: 5 }).map((_, i) => ({ status_index: i, status_value: 0 }));
+			const page_updates = pages.map((p: any) => ({ page_id: p.id, updates: Array.from({ length: 5 }).map((_, i) => ({ status_index: i, status_value: 0 })) }));
+			const result = await api.updateVideoStatus(id, { video_updates, page_updates });
+			const data = result.data;
+			if (data.success) {
+				toast.success('设置成功', {
+					description: `视频「${data.video.name}」已设为未完成`
+				});
+				const { query, currentPage, videoSource, statusFilter, validationFilter } = $appStateStore;
+				await loadVideos(query, currentPage, videoSource, statusFilter, validationFilter);
+			} else {
+				toast.info('没有需要更新的视频');
+			}
+		} catch (error) {
+			console.error('设为未完成失败：', error);
+			toast.error('设为未完成失败', {
+				description: (error as ApiError).message
+			});
+		}
+	}
+
 	async function handleResetAllVideos() {
 		resettingAll = true;
 		try {
@@ -490,6 +516,9 @@
 				}}
 				onClearAndReset={async () => {
 					await handleClearAndResetVideo(video.id);
+				}}
+				onSetUncompleted={async () => {
+					await handleSetUncompletedVideo(video.id);
 				}}
 				onDelete={async () => {
 					await handleDeleteVideo(video.id);

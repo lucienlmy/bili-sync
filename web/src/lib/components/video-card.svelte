@@ -29,10 +29,12 @@
 	export let showProgress: boolean = true; // 是否显示进度信息
 	export let onReset: ((forceReset: boolean) => Promise<void>) | null = null; // 自定义重置函数
 	export let onClearAndReset: (() => Promise<void>) | null = null; // 自定义清空重置函数
+	export let onSetUncompleted: (() => Promise<void>) | null = null; // 自定义设为未完成函数
 	export let resetDialogOpen = false; // 导出对话框状态，让父组件可以控制
 	export let clearAndResetDialogOpen = false; // 导出清空重置对话框状态
 	export let resetting = false;
 	export let clearAndResetting = false;
+	let settingUncompleted = false;
 
 	let forceReset = false;
 
@@ -177,6 +179,14 @@ async function saveDbEdits() {
 		clearAndResetDialogOpen = false;
 	}
 
+	async function handleSetUncompleted() {
+		settingUncompleted = true;
+		if (onSetUncompleted) {
+			await onSetUncompleted();
+		}
+		settingUncompleted = false;
+	}
+
 	async function handleDelete() {
 		deleting = true;
 		if (onDelete) {
@@ -309,6 +319,10 @@ async function saveDbEdits() {
 							{/snippet}
 						</DropdownMenu.Trigger>
 						<DropdownMenu.Content align="start" class="w-48">
+							<DropdownMenu.Item class="cursor-pointer" onclick={handleSetUncompleted}>
+								<RotateCcwIcon class="mr-2 h-4 w-4" />
+								{settingUncompleted ? '设置中...' : '设为未完成'}
+							</DropdownMenu.Item>
 							<DropdownMenu.Item class="cursor-pointer" onclick={() => (resetDialogOpen = true)}>
 								<RotateCcwIcon class="mr-2 h-4 w-4" />
 								重置
