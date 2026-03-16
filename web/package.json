@@ -49,7 +49,7 @@
 		"lint": "prettier --check . && eslint .",
 		"后端构建-backend:build": "cd ../crates/bili_sync && cargo build --release",
 		"后端清理-clean:backend": "cd ../crates/bili_sync && cargo clean",
-		"一键npm和cargo:build:embed": "npm run build && npm run backend:build"
+		"一键npm和cargo:build:embed": "npm run build && npm run 后端构建-backend:build"
 	},
 	"scriptsDoc": {
 		"dev": "启动开发服务器（vite dev），用于本地调试，支持热重载，前端请求会被代理到本地后端 /api。",

@@ -32,6 +32,7 @@
 	let videoSourcesData: VideoSourcesDetailsResponse | null = null;
 	let loading = false;
 	let activeTab = 'favorites';
+	let togglingIds = new Set<number>(); // 记录正在切换的 source id
 
 	// 添加对话框状态
 	let showAddDialog = false;
@@ -159,6 +160,46 @@
 			});
 		} finally {
 			saving = false;
+		}
+	}
+
+	// 切换启用状态
+	async function toggleEnabled(type: string, source: VideoSourceDetail, index: number) {
+		if (togglingIds.has(source.id)) return;
+
+		togglingIds.add(source.id);
+		togglingIds = togglingIds; // 触发响应式更新
+
+		try {
+			const newEnabled = !source.enabled;
+			let response = await api.updateVideoSource(type, source.id, {
+				path: source.path,
+				enabled: newEnabled,
+				rule: source.rule,
+				useDynamicApi: source.useDynamicApi
+			});
+
+			// 更新本地数据
+			if (videoSourcesData) {
+				const sources = videoSourcesData[
+					type as keyof VideoSourcesDetailsResponse
+				] as VideoSourceDetail[];
+				sources[index] = {
+					...sources[index],
+					enabled: newEnabled,
+					ruleDisplay: response.data.ruleDisplay
+				};
+				videoSourcesData = { ...videoSourcesData };
+			}
+
+			toast.success(newEnabled ? '已启用' : '已禁用');
+		} catch (error) {
+			toast.error('切换失败', {
+				description: (error as ApiError).message
+			});
+		} finally {
+			togglingIds.delete(source.id);
+			togglingIds = togglingIds; // 触发响应式更新
 		}
 	}
 
@@ -362,21 +403,30 @@
 												{/if}
 											</Table.Cell>
 											<Table.Cell>
-												{#if source.enabled}
-													<Badge
-														class="flex w-fit items-center gap-1.5 bg-emerald-700 text-emerald-100"
-													>
-														<CircleCheckBigIcon class="h-3 w-3" />
-														已启用{#if key === 'submissions' && source.useDynamicApi !== null}{source.useDynamicApi
-																? '（动态 API）'
-																: ''}{/if}
-													</Badge>
-												{:else}
-													<Badge class="flex w-fit items-center gap-1.5 bg-rose-700 text-rose-100 ">
-														<CircleXIcon class="h-3 w-3" />
-														已禁用
-													</Badge>
-												{/if}
+												{@const isToggling = togglingIds.has(source.id)}
+												<button
+													onclick={() => toggleEnabled(key, source, index)}
+													disabled={isToggling}
+													class="transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+												>
+													{#if source.enabled}
+														<Badge
+															class="flex w-fit cursor-pointer items-center gap-1.5 bg-emerald-700 text-emerald-100"
+														>
+															<CircleCheckBigIcon class="h-3 w-3" />
+															{isToggling ? '切换中...' : '已启用'}{#if key === 'submissions' && source.useDynamicApi !== null}{source.useDynamicApi
+																	? '（动态 API）'
+																	: ''}{/if}
+														</Badge>
+													{:else}
+														<Badge
+															class="flex w-fit cursor-pointer items-center gap-1.5 bg-rose-700 text-rose-100"
+														>
+															<CircleXIcon class="h-3 w-3" />
+															{isToggling ? '切换中...' : '已禁用'}
+														</Badge>
+													{/if}
+												</button>
 											</Table.Cell>
 
 											<Table.Cell class="text-right">
