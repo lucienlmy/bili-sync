@@ -32,6 +32,7 @@ export interface VideoInfo {
 	bvid: string;
 	name: string;
 	upper_name: string;
+	path?: string;
 	valid: boolean;
 	should_download: boolean;
 	download_status: [number, number, number, number, number];
@@ -46,6 +47,7 @@ export interface PageInfo {
 	id: number;
 	pid: number;
 	name: string;
+	path?: string;
 	download_status: [number, number, number, number, number];
 }
 

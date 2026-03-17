@@ -18,6 +18,7 @@
 	import { goto } from '$app/navigation';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import api from '$lib/api';
+	import { toast } from 'svelte-sonner';
 
 	// 将 bvid 设置为可选属性，但保留 VideoInfo 的其它所有属性
 	export let video: Omit<VideoInfo, 'bvid'> & { bvid?: string };
@@ -35,6 +36,7 @@
 	export let resetting = false;
 	export let clearAndResetting = false;
 	let settingUncompleted = false;
+	let localPath: string | null = null;
 
 	let forceReset = false;
 
@@ -187,6 +189,47 @@ async function saveDbEdits() {
 		settingUncompleted = false;
 	}
 
+	async function handleOpenLocalFolder() {
+		// 复制已缓存的本地路径（若未缓存则先加载）
+		try {
+			if (localPath === null) {
+				await loadLocalPath();
+			}
+			if (localPath) {
+				await navigator.clipboard.writeText(localPath);
+				toast.success('已复制本地路径到剪贴板');
+			} else {
+				toast.error('未找到本地路径');
+			}
+		} catch (e) {
+			console.error('复制本地路径失败', e);
+			toast.error('复制本地路径失败');
+		}
+	}
+
+	async function loadLocalPath() {
+		try {
+			const res = await api.getVideo(video.id);
+			let path = '';
+			if (res.data.video?.path) {
+				path = res.data.video.path;
+			} else if (res.data.pages && res.data.pages.length > 0) {
+				const firstPage = res.data.pages.find((p: any) => p.path && p.path !== '');
+				if (firstPage) path = firstPage.path;
+			}
+			localPath = path || '';
+		} catch (e) {
+			console.error('获取本地路径失败', e);
+			localPath = '';
+		}
+	}
+
+	function shortPath(p: string) {
+		if (!p) return p;
+		if (p.length <= 60) return p;
+		return '...' + p.slice(-57);
+	}
+
 	async function handleDelete() {
 		deleting = true;
 		if (onDelete) {
@@ -306,7 +349,7 @@ async function saveDbEdits() {
 					</Button>
 
 					<DropdownMenu.Root>
-						<DropdownMenu.Trigger>
+						<DropdownMenu.Trigger onclick={loadLocalPath}>
 							{#snippet child({ props })}
 								<Button
 									{...props}
@@ -341,6 +384,18 @@ async function saveDbEdits() {
 							>
 								<SquareArrowOutUpRightIcon class="mr-2 h-4 w-4" />
 								在 B 站打开
+							</DropdownMenu.Item>
+							<DropdownMenu.Item class="cursor-pointer" onclick={handleOpenLocalFolder}>
+								<SquareArrowOutUpRightIcon class="mr-2 h-4 w-4" />
+								{#if localPath === null}
+									打开本地位置
+								{:else}
+									{#if localPath}
+										<span class="break-words">{shortPath(localPath)}</span>
+									{:else}
+										未找到本地路径
+									{/if}
+								{/if}
 							</DropdownMenu.Item>
 						</DropdownMenu.Content>
 					</DropdownMenu.Root>

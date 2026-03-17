@@ -223,6 +223,7 @@ pub async fn clear_and_reset_video_status(
             id: video_info.id,
             bvid: video_info.bvid,
             name: video_info.name,
+            path: Some(video_info.path),
             upper_name: video_info.upper_name,
             valid: video_info.valid,
             should_download: video_info.should_download,

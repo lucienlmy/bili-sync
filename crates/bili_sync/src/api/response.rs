@@ -73,6 +73,7 @@ pub struct VideoInfo {
     pub bvid: String,
     pub name: String,
     pub upper_name: String,
+    pub path: Option<String>,
     pub valid: bool,
     pub should_download: bool,
     #[serde(serialize_with = "serde_video_download_status")]
@@ -86,6 +87,7 @@ pub struct PageInfo {
     pub video_id: i32,
     pub pid: i32,
     pub name: String,
+    pub path: Option<String>,
     #[serde(serialize_with = "serde_page_download_status")]
     pub download_status: u32,
 }
