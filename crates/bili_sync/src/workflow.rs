@@ -695,6 +695,7 @@ pub async fn fetch_page_video(
     }
     if cx.config.skip_option.no_overwrite {
         if tokio::fs::metadata(page_path).await.is_ok() {
+            info!("【文件层】目标已存在且不覆盖，跳过视频：{}", page_path.display());
             return Ok(ExecutionStatus::Skipped);
         }
     }
