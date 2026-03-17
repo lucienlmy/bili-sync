@@ -68,6 +68,19 @@ pub struct SkipOption {
     pub no_video: bool,
     #[serde(default)]
     pub no_overwrite: bool,
+    // 细粒度不覆盖控制
+    #[serde(default)]
+    pub no_overwrite_video: bool,
+    #[serde(default)]
+    pub no_overwrite_poster: bool,
+    #[serde(default)]
+    pub no_overwrite_video_nfo: bool,
+    #[serde(default)]
+    pub no_overwrite_upper: bool,
+    #[serde(default)]
+    pub no_overwrite_danmaku: bool,
+    #[serde(default)]
+    pub no_overwrite_subtitle: bool,
     pub no_upper: bool,
     pub no_danmaku: bool,
     pub no_subtitle: bool,
@@ -86,6 +99,12 @@ impl Default for SkipOption {
             no_video_nfo: false,
             no_video: false,
             no_overwrite: false,
+            no_overwrite_video: false,
+            no_overwrite_poster: false,
+            no_overwrite_video_nfo: false,
+            no_overwrite_upper: false,
+            no_overwrite_danmaku: false,
+            no_overwrite_subtitle: false,
             no_upper: false,
             no_danmaku: false,
             no_subtitle: false,

@@ -682,6 +682,37 @@
 										<Switch id="no-overwrite" bind:checked={formData.skip_option.no_overwrite} />
 										<Label for="no-overwrite">下载时不覆盖已存在的文件</Label>
 									</div>
+									{#if formData.skip_option.no_overwrite}
+										<div class="pl-6 mt-2 space-y-2">
+											<p class="text-muted-foreground text-sm">细粒度控制：启用后可针对以下资源独立设置不覆盖策略</p>
+											<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+												<div class="flex items-center space-x-2">
+													<Switch id="no-overwrite-video" bind:checked={formData.skip_option.no_overwrite_video} />
+													<Label for="no-overwrite-video">视频 文件</Label>
+												</div>
+												<div class="flex items-center space-x-2">
+													<Switch id="no-overwrite-poster" bind:checked={formData.skip_option.no_overwrite_poster} />
+													<Label for="no-overwrite-poster">封面 / fanart</Label>
+												</div>
+												<div class="flex items-center space-x-2">
+													<Switch id="no-overwrite-video-nfo" bind:checked={formData.skip_option.no_overwrite_video_nfo} />
+													<Label for="no-overwrite-video-nfo">视频 NFO</Label>
+												</div>
+												<div class="flex items-center space-x-2">
+													<Switch id="no-overwrite-upper" bind:checked={formData.skip_option.no_overwrite_upper} />
+													<Label for="no-overwrite-upper">Up 主头像 / 信息</Label>
+												</div>
+												<div class="flex items-center space-x-2">
+													<Switch id="no-overwrite-danmaku" bind:checked={formData.skip_option.no_overwrite_danmaku} />
+													<Label for="no-overwrite-danmaku">弹幕</Label>
+												</div>
+												<div class="flex items-center space-x-2">
+													<Switch id="no-overwrite-subtitle" bind:checked={formData.skip_option.no_overwrite_subtitle} />
+													<Label for="no-overwrite-subtitle">字幕</Label>
+												</div>
+											</div>
+										</div>
+									{/if}
 									<div class="flex items-center space-x-2">
 										<Switch id="prefer-link-for-fanart" bind:checked={formData.skip_option.prefer_link_for_fanart} />
 										<Label for="prefer-link-for-fanart">优先使用链接保存 fanart（硬链接 → 符号链接 → 复制）</Label>

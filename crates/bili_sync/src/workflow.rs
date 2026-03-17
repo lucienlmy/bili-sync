@@ -667,8 +667,9 @@ pub async fn fetch_page_poster(
             None => video_model.cover.as_str(),
         }
     };
-    if cx.config.skip_option.no_overwrite {
+    if cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_poster {
         if fs::metadata(&poster_path).await.is_ok() {
+            info!("【文件层】目标已存在且不覆盖，跳过封面：{}", poster_path.display());
             return Ok(ExecutionStatus::Skipped);
         }
     }
@@ -677,7 +678,7 @@ pub async fn fetch_page_poster(
         .fetch(url, &poster_path, &cx.config.concurrent_limit.download)
         .await?;
     if let Some(fanart_path) = fanart_path {
-        let overwrite = !cx.config.skip_option.no_overwrite;
+        let overwrite = !(cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_poster);
         create_equivalent(&poster_path, &fanart_path, cx.config.skip_option.prefer_link_for_fanart, overwrite).await?;
     }
     Ok(ExecutionStatus::Succeeded)
@@ -693,7 +694,7 @@ pub async fn fetch_page_video(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
-    if cx.config.skip_option.no_overwrite {
+    if cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_video {
         if tokio::fs::metadata(page_path).await.is_ok() {
             info!("【文件层】目标已存在且不覆盖，跳过视频：{}", page_path.display());
             return Ok(ExecutionStatus::Skipped);
@@ -754,7 +755,7 @@ pub async fn fetch_page_danmaku(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
-    if cx.config.skip_option.no_overwrite {
+    if cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_danmaku {
         if fs::metadata(&danmaku_path).await.is_ok() {
             info!("【文件层】目标已存在且不覆盖，跳过弹幕：{}", danmaku_path.display());
             return Ok(ExecutionStatus::Skipped);
@@ -788,7 +789,7 @@ pub async fn fetch_page_subtitle(
         .into_iter()
         .map(|subtitle| async move {
             let path = subtitle_path.with_extension(format!("{}.srt", subtitle.lan));
-            if cx.config.skip_option.no_overwrite {
+            if cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_subtitle {
                 if tokio::fs::metadata(&path).await.is_ok() {
                     info!("【文件层】目标已存在且不覆盖，跳过字幕：{}", path.display());
                     return Ok(());
@@ -822,7 +823,7 @@ pub async fn generate_page_nfo(
     } else {
         NFO::Episode(page_model.to_nfo(cx.config.nfo_time_type))
     };
-    generate_nfo(nfo, nfo_path, cx.config.skip_option.no_overwrite).await?;
+    generate_nfo(nfo, nfo_path, cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_video_nfo).await?;
     Ok(ExecutionStatus::Succeeded)
 }
 
@@ -836,8 +837,9 @@ pub async fn fetch_video_poster(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
-    if cx.config.skip_option.no_overwrite {
+    if cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_poster {
         if fs::metadata(&poster_path).await.is_ok() {
+            info!("【文件层】目标已存在且不覆盖，跳过封面：{}", poster_path.display());
             return Ok(ExecutionStatus::Skipped);
         }
     }
@@ -845,7 +847,7 @@ pub async fn fetch_video_poster(
     cx.downloader
         .fetch(&video_model.cover, &poster_path, &cx.config.concurrent_limit.download)
         .await?;
-    let overwrite = !cx.config.skip_option.no_overwrite;
+    let overwrite = !(cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_poster);
     create_equivalent(&poster_path, &fanart_path, cx.config.skip_option.prefer_link_for_fanart, overwrite).await?;
     Ok(ExecutionStatus::Succeeded)
 }
@@ -859,8 +861,9 @@ pub async fn fetch_upper_face(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
-    if cx.config.skip_option.no_overwrite {
+    if cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_upper {
         if fs::metadata(&upper_face_path).await.is_ok() {
+            info!("【文件层】目标已存在且不覆盖，跳过 Up 主头像：{}", upper_face_path.display());
             return Ok(ExecutionStatus::Skipped);
         }
     }
@@ -884,7 +887,7 @@ pub async fn generate_upper_nfo(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
-    generate_nfo(NFO::Upper(video_model.to_nfo(cx.config.nfo_time_type)), nfo_path, cx.config.skip_option.no_overwrite).await?;
+    generate_nfo(NFO::Upper(video_model.to_nfo(cx.config.nfo_time_type)), nfo_path, cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_upper).await?;
     Ok(ExecutionStatus::Succeeded)
 }
 
@@ -897,7 +900,7 @@ pub async fn generate_video_nfo(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
-    generate_nfo(NFO::TVShow(video_model.to_nfo(cx.config.nfo_time_type)), nfo_path, cx.config.skip_option.no_overwrite).await?;
+    generate_nfo(NFO::TVShow(video_model.to_nfo(cx.config.nfo_time_type)), nfo_path, cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_video_nfo).await?;
     Ok(ExecutionStatus::Succeeded)
 }
 
@@ -905,7 +908,7 @@ pub async fn generate_video_nfo(
 async fn generate_nfo(nfo: NFO<'_>, nfo_path: PathBuf, no_overwrite: bool) -> Result<()> {
     if no_overwrite {
         if fs::metadata(&nfo_path).await.is_ok() {
-            info!("【文件层】目标已存在且不覆盖，跳过：{}", nfo_path.display());
+            info!("【文件层】目标已存在且不覆盖，跳过 NFO：{}", nfo_path.display());
             return Ok(());
         }
     }

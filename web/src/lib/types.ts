@@ -269,6 +269,13 @@ export interface SkipOption {
 	no_video_nfo: boolean;
 	no_video: boolean;
 	no_overwrite: boolean;
+	// 细粒度不覆盖控制（可选，前端用于显示/保存）
+	no_overwrite_video?: boolean;
+	no_overwrite_poster?: boolean;
+	no_overwrite_video_nfo?: boolean;
+	no_overwrite_upper?: boolean;
+	no_overwrite_danmaku?: boolean;
+	no_overwrite_subtitle?: boolean;
 	no_upper: boolean;
 	no_danmaku: boolean;
 	no_subtitle: boolean;
