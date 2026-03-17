@@ -361,16 +361,8 @@ pub async fn download_video_pages(
         .take(4)
         .zip(["封面", "详情", "作者头像", "作者详情"])
         .for_each(|(res, task_name)| match res {
-            ExecutionStatus::Skipped => info!(
-                "【视频层】处理视频「{}」{}：已跳过（已完成或已存在）",
-                &video_model.name,
-                task_name
-            ),
-            ExecutionStatus::Succeeded => info!(
-                "【视频层】处理视频「{}」{}：成功",
-                &video_model.name,
-                task_name
-            ),
+            ExecutionStatus::Skipped => info!("【视频层】处理视频「{}」{}：已成功过，跳过",&video_model.name,task_name),
+            ExecutionStatus::Succeeded => info!("【视频层】处理视频「{}」{}：成功",&video_model.name,task_name),
             ExecutionStatus::Ignored(e) => {
                 error!(
                     "【视频层】处理视频「{}」{}：出现常见错误，已忽略：{:#}",
@@ -378,10 +370,7 @@ pub async fn download_video_pages(
                 )
             }
             ExecutionStatus::Failed(e) => {
-                error!(
-                    "【视频层】处理视频「{}」{}：失败：{:#}",
-                    &video_model.name, task_name, e
-                )
+                error!("【视频层】处理视频「{}」{}：失败：{:#}", &video_model.name, task_name, e)
             }
             ExecutionStatus::Fixed(_) => unreachable!(),
         });
@@ -598,16 +587,12 @@ pub async fn download_page(
         .zip(["封面", "视频", "详情", "弹幕", "字幕"])
         .for_each(|(res, task_name)| match res {
             ExecutionStatus::Skipped => info!(
-                "【分页层】处理视频「{}」第 {} 页{}：已跳过（已完成或已存在）",
-                &video_model.name,
-                page_model.pid,
-                task_name
+                "【分页层】处理视频「{}」第 {} 页{}已成功过，跳过",
+                &video_model.name, page_model.pid, task_name
             ),
             ExecutionStatus::Succeeded => info!(
-                "【分页层】处理视频「{}」第 {} 页{}：成功",
-                &video_model.name,
-                page_model.pid,
-                task_name
+                "【分页层】处理视频「{}」第 {} 页{}成功",
+                &video_model.name, page_model.pid, task_name
             ),
             ExecutionStatus::Ignored(e) => {
                 error!(
