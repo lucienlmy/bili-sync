@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::io::ErrorKind;
 use std::pin::Pin;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -13,12 +12,11 @@ use sea_orm::entity::prelude::*;
 use tokio::fs;
 use tokio::sync::Semaphore;
 use tokio::task;
-use crate::config::SkipOption;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
 #[cfg(windows)]
 use std::os::windows::fs as windows_fs;
-use std::ffi::OsStr;
+// removed unused imports
 
 use crate::adapter::{VideoSource, VideoSourceEnum};
 use crate::bilibili::{BestStream, BiliClient, BiliError, Dimension, PageInfo, Video, VideoInfo};
@@ -37,28 +35,51 @@ use crate::utils::notify::notify;
 use crate::utils::rule::FieldEvaluatable;
 use crate::utils::status::{PageStatus, STATUS_OK, VideoStatus};
 
-async fn create_equivalent(src: &Path, dst: &Path, prefer_link: bool) -> Result<()> {
-    // If not preferring links, always copy
+async fn create_equivalent(src: &Path, dst: &Path, prefer_link: bool, overwrite: bool) -> Result<()> {
+    // 文件层日志：记录尝试策略与目标
+    info!("【文件层】尝试为 '{}' 创建等价文件 -> '{}' (prefer_link={}, overwrite={})", src.display(), dst.display(), prefer_link, overwrite);
+    // 如果不优先使用链接，则直接复制（根据 overwrite 决定是否覆盖）
     if !prefer_link {
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent).await?;
         }
+        if !overwrite {
+            if fs::metadata(&dst).await.is_ok() {
+                info!("【文件层】目标已存在且不覆盖，跳过：{}", dst.display());
+                return Ok(());
+            }
+        }
         fs::copy(src, dst).await?;
+        info!("【文件层】复制成功：{} -> {}", src.display(), dst.display());
         return Ok(());
+    }
+
+    // prefer_link == true：优先使用硬链接。若目标已存在且不覆盖则直接跳过
+    if fs::metadata(&dst).await.is_ok() {
+        if !overwrite {
+            info!("【文件层】目标已存在且不覆盖，跳过链接创建：{}", dst.display());
+            return Ok(());
+        }
+        // overwrite == true：尝试先删除目标以便创建新链接
+        match fs::remove_file(&dst).await {
+            Ok(_) => info!("【文件层】删除已存在目标，以便创建新硬链接：{}", dst.display()),
+            Err(e) => warn!("【文件层】删除已存在目标失败（将继续尝试创建链接或回退）：{}，错误：{}", dst.display(), e),
+        }
     }
 
     // 1) Try hard link
     match fs::hard_link(src, dst).await {
-        Ok(_) => return Ok(()),
+        Ok(_) => {
+            info!("【文件层】硬链接创建成功：{} -> {}", src.display(), dst.display());
+            return Ok(());
+        }
         Err(e) => {
-            if e.kind() == ErrorKind::AlreadyExists {
-                return Ok(());
-            }
-            // else fallthrough to next strategies
+            warn!("【文件层】尝试创建硬链接失败：{} -> {}，错误：{}，将尝试符号链接/复制", src.display(), dst.display(), e);
+            // fallthrough
         }
     }
 
-    // 2) Try symlink
+    // 2) Try symlink (may be privileged on Windows)
     let symlink_res = {
         let src_owned = src.to_path_buf();
         let dst_owned = dst.to_path_buf();
@@ -84,14 +105,18 @@ async fn create_equivalent(src: &Path, dst: &Path, prefer_link: bool) -> Result<
         .await
     };
     if let Ok(Ok(())) = symlink_res {
+        info!("【文件层】符号链接创建成功：{} -> {}", src.display(), dst.display());
         return Ok(());
+    } else if let Ok(Err(e)) = symlink_res {
+        warn!("【文件层】创建符号链接失败：{} -> {}，错误：{}，将回退到复制", src.display(), dst.display(), e);
     }
 
-    // 4) Fallback to copy
+    // 3) Fallback to copy (覆盖或创建目录)
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent).await?;
     }
     fs::copy(src, dst).await?;
+    info!("【文件层】复制回退成功：{} -> {}", src.display(), dst.display());
     Ok(())
 }
 
@@ -652,7 +677,8 @@ pub async fn fetch_page_poster(
         .fetch(url, &poster_path, &cx.config.concurrent_limit.download)
         .await?;
     if let Some(fanart_path) = fanart_path {
-        create_equivalent(&poster_path, &fanart_path, cx.config.skip_option.prefer_link_for_fanart).await?;
+        let overwrite = !cx.config.skip_option.no_overwrite;
+        create_equivalent(&poster_path, &fanart_path, cx.config.skip_option.prefer_link_for_fanart, overwrite).await?;
     }
     Ok(ExecutionStatus::Succeeded)
 }
@@ -729,16 +755,19 @@ pub async fn fetch_page_danmaku(
     }
     if cx.config.skip_option.no_overwrite {
         if fs::metadata(&danmaku_path).await.is_ok() {
+            info!("【文件层】目标已存在且不覆盖，跳过弹幕：{}", danmaku_path.display());
             return Ok(ExecutionStatus::Skipped);
         }
     }
 
+    let existed = fs::metadata(&danmaku_path).await.is_ok();
     let bili_video = Video::new(cx.bili_client, video_model.bvid.clone(), &cx.config.credential);
     bili_video
         .get_danmaku_writer(page_info)
         .await?
-        .write(danmaku_path, &cx.config.danmaku_option)
+        .write(danmaku_path.clone(), &cx.config.danmaku_option)
         .await?;
+    info!("【文件层】写入弹幕：{} ({})", danmaku_path.display(), if existed { "overwrite" } else { "create" });
     Ok(ExecutionStatus::Succeeded)
 }
 
@@ -760,10 +789,16 @@ pub async fn fetch_page_subtitle(
             let path = subtitle_path.with_extension(format!("{}.srt", subtitle.lan));
             if cx.config.skip_option.no_overwrite {
                 if tokio::fs::metadata(&path).await.is_ok() {
+                    info!("【文件层】目标已存在且不覆盖，跳过字幕：{}", path.display());
                     return Ok(());
                 }
             }
-            tokio::fs::write(path, subtitle.body.to_string()).await
+            let existed = tokio::fs::metadata(&path).await.is_ok();
+            let res = tokio::fs::write(&path, subtitle.body.to_string()).await;
+            if res.is_ok() {
+                info!("【文件层】写入字幕：{} ({})", path.display(), if existed { "overwrite" } else { "create" });
+            }
+            res
         })
         .collect::<FuturesUnordered<_>>();
     tasks.try_collect::<Vec<()>>().await?;
@@ -809,7 +844,8 @@ pub async fn fetch_video_poster(
     cx.downloader
         .fetch(&video_model.cover, &poster_path, &cx.config.concurrent_limit.download)
         .await?;
-    create_equivalent(&poster_path, &fanart_path, cx.config.skip_option.prefer_link_for_fanart).await?;
+    let overwrite = !cx.config.skip_option.no_overwrite;
+    create_equivalent(&poster_path, &fanart_path, cx.config.skip_option.prefer_link_for_fanart, overwrite).await?;
     Ok(ExecutionStatus::Succeeded)
 }
 
@@ -868,12 +904,15 @@ pub async fn generate_video_nfo(
 async fn generate_nfo(nfo: NFO<'_>, nfo_path: PathBuf, no_overwrite: bool) -> Result<()> {
     if no_overwrite {
         if fs::metadata(&nfo_path).await.is_ok() {
+            info!("【文件层】目标已存在且不覆盖，跳过：{}", nfo_path.display());
             return Ok(());
         }
     }
     if let Some(parent) = nfo_path.parent() {
         fs::create_dir_all(parent).await?;
     }
-    fs::write(nfo_path, nfo.generate_nfo().await?.as_bytes()).await?;
+    let existed = fs::metadata(&nfo_path).await.is_ok();
+    fs::write(&nfo_path, nfo.generate_nfo().await?.as_bytes()).await?;
+    info!("【文件层】写入 NFO：{} ({})", nfo_path.display(), if existed { "overwrite" } else { "create" });
     Ok(())
 }

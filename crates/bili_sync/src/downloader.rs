@@ -35,7 +35,9 @@ impl Downloader {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).await?;
         }
+        let existed = fs::metadata(path).await.is_ok();
         fs::copy(temp_file.file_path(), path).await?;
+        info!("【文件层】保存文件：{} ({})", path.display(), if existed { "overwrite" } else { "create" });
         // temp_file 的 drop 需要 std::fs::remove_file
         // 如果交由 rust 自动执行虽然逻辑正确但会略微阻塞异步上下文
         // 尽量主动调用，保证正常执行的情况下文件清除操作由 spawn_blocking 在专门线程中完成
@@ -53,7 +55,9 @@ impl Downloader {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).await?;
         }
+        let existed = fs::metadata(path).await.is_ok();
         fs::copy(temp_file.file_path(), path).await?;
+        info!("【文件层】保存文件：{} ({})", path.display(), if existed { "overwrite" } else { "create" });
         temp_file.drop_async().await;
         Ok(())
     }
@@ -94,7 +98,9 @@ impl Downloader {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).await?;
         }
+        let existed = fs::metadata(path).await.is_ok();
         fs::copy(final_temp_file.file_path(), path).await?;
+        info!("【文件层】保存文件：{} ({})", path.display(), if existed { "overwrite" } else { "create" });
         tokio::join!(
             video_temp_file.drop_async(),
             audio_temp_file.drop_async(),
