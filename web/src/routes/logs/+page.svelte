@@ -6,6 +6,7 @@
 
 	let unsubscribeLog: (() => void) | null = null;
 	let logs: Array<{ timestamp: string; level: string; message: string }> = [];
+	let progressMap: Record<string, { done: number; total: number; percent: number; updatedAt: number }> = {};
 	let shouldAutoScroll = true;
 	let main: HTMLElement | null = null;
 	let scrollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,7 +56,21 @@
 		main = document.getElementById('main');
 		main?.addEventListener('scroll', checkScrollPosition);
 		unsubscribeLog = api.subscribeToLogs((data: string) => {
-			logs = [...logs.slice(-499), JSON.parse(data)];
+			const entry = JSON.parse(data);
+			const msg: string = entry.message || '';
+			if (msg.startsWith('【文件层进度】')) {
+				try {
+					const json = JSON.parse(msg.replace('【文件层进度】', ''));
+					const id = json.id || json.path || 'unknown';
+					progressMap[id] = { done: json.done || 0, total: json.total || 0, percent: json.percent || 0, updatedAt: Date.now() };
+					// keep a small recent logs buffer too
+					logs = [...logs.slice(-499), entry];
+				} catch (e) {
+					logs = [...logs.slice(-499), entry];
+				}
+			} else {
+				logs = [...logs.slice(-499), entry];
+			}
 			if (scrollTimer) clearTimeout(scrollTimer);
 			scrollTimer = setTimeout(scrollToBottom, 20);
 		});
@@ -112,6 +127,21 @@
 			</div>
 		{/key}
 	{/each}
+		{#if Object.keys(progressMap).length > 0}
+			<div class="space-y-2 mb-2">
+				{#each Object.entries(progressMap) as [id, p]}
+					<div class="flex items-center gap-3 font-mono text-xs">
+						<div class="w-32 text-muted-foreground truncate">{id}</div>
+						<div class="flex-1">
+							<div class="w-full bg-gray-200 rounded h-3 overflow-hidden">
+								<div class="h-3 bg-emerald-500" style="width: {Math.min(100, p.percent)}%"></div>
+							</div>
+							<div class="text-xs text-muted-foreground">{p.percent}% — {Math.round(p.done/1024)} KB / {p.total ? Math.round(p.total/1024) + ' KB' : '??'}</div>
+						</div>
+					</div>
+				{/each}
+			</div>
+		{/if}
 	{#if logs.length === 0}
 		<div class="text-muted-foreground py-8 text-center">暂无日志记录</div>
 	{/if}
