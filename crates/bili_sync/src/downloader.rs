@@ -30,9 +30,9 @@ impl Downloader {
         Self { client }
     }
 
-    pub async fn fetch(&self, url: &str, path: &Path, concurrent_download: &ConcurrentDownloadLimit) -> Result<()> {
+    pub async fn fetch(&self, url: &str, path: &Path, concurrent_download: &ConcurrentDownloadLimit, kind: Option<&str>) -> Result<()> {
         let mut temp_file = TempFile::new().await?;
-        self.fetch_internal(url, &mut temp_file, false, concurrent_download)
+        self.fetch_internal(url, &mut temp_file, false, concurrent_download, Some(path), kind)
             .await?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).await?;
@@ -52,8 +52,9 @@ impl Downloader {
         urls: &[&str],
         path: &Path,
         concurrent_download: &ConcurrentDownloadLimit,
+        kind: Option<&str>,
     ) -> Result<()> {
-        let temp_file = self.multi_fetch_internal(urls, true, concurrent_download).await?;
+        let temp_file = self.multi_fetch_internal(urls, Some(path), true, concurrent_download, kind).await?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).await?;
         }
@@ -70,10 +71,11 @@ impl Downloader {
         audio_urls: &[&str],
         path: &Path,
         concurrent_download: &ConcurrentDownloadLimit,
+        kind: Option<&str>,
     ) -> Result<()> {
         let (video_temp_file, audio_temp_file) = tokio::try_join!(
-            self.multi_fetch_internal(video_urls, true, concurrent_download),
-            self.multi_fetch_internal(audio_urls, true, concurrent_download)
+            self.multi_fetch_internal(video_urls, Some(path), true, concurrent_download, kind),
+            self.multi_fetch_internal(audio_urls, Some(path), true, concurrent_download, kind)
         )?;
         let final_temp_file = TempFile::new().await?;
         let output = Command::new(ARGS.ffmpeg_path.as_deref().unwrap_or("ffmpeg"))
@@ -114,8 +116,10 @@ impl Downloader {
     async fn multi_fetch_internal(
         &self,
         urls: &[&str],
+        target: Option<&Path>,
         is_stream: bool,
         concurrent_download: &ConcurrentDownloadLimit,
+        kind: Option<&str>,
     ) -> Result<TempFile> {
         if urls.is_empty() {
             bail!("no urls provided");
@@ -123,7 +127,7 @@ impl Downloader {
         let mut temp_file = TempFile::new().await?;
         for (idx, url) in urls.iter().enumerate() {
             match self
-                .fetch_internal(url, &mut temp_file, is_stream, concurrent_download)
+                .fetch_internal(url, &mut temp_file, is_stream, concurrent_download, target, kind)
                 .await
             {
                 Ok(_) => return Ok(temp_file),
@@ -146,15 +150,17 @@ impl Downloader {
         file: &mut TempFile,
         is_stream: bool,
         concurrent_download: &ConcurrentDownloadLimit,
+        target: Option<&Path>,
+        kind: Option<&str>,
     ) -> Result<()> {
         if concurrent_download.enable {
-            self.fetch_parallel(url, file, is_stream, concurrent_download).await
+            self.fetch_parallel(url, file, is_stream, concurrent_download, target, kind).await
         } else {
-            self.fetch_serial(url, file).await
+            self.fetch_serial(url, file, target, kind).await
         }
     }
 
-    async fn fetch_serial(&self, url: &str, file: &mut TempFile) -> Result<()> {
+    async fn fetch_serial(&self, url: &str, file: &mut TempFile, target: Option<&Path>, kind: Option<&str>) -> Result<()> {
         let resp = self
             .client
             .request(Method::GET, url, None)
@@ -170,9 +176,33 @@ impl Downloader {
         let last_percent = Arc::new(AtomicU64::new(0));
         // 0: none, 1: start logged, 2: 50% logged, 3: finished logged
         let last_phase = Arc::new(AtomicU64::new(0));
+        // friendly id: prefer target file name, fallback to temp file name
+        let id_display = target
+            .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
+            .or_else(|| file.file_path().file_name().map(|s| s.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| file.file_path().to_string_lossy().into_owned());
+        // file type: prefer explicit kind, fallback to target/temp extension
+        let file_type = kind
+            .map(|s| s.to_string())
+            .or_else(|| {
+                target
+                    .and_then(|p| p.extension().map(|s| s.to_string_lossy().into_owned()))
+                    .or_else(|| file.file_path().extension().map(|s| s.to_string_lossy().into_owned()))
+            })
+            .map(|s| s.to_uppercase())
+            .unwrap_or_else(|| "UNKNOWN".to_string());
+        // full path, but simplify LOCALAPPDATA on Windows to keep logs concise
+        let mut full_path_display = target
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| file.file_path().to_string_lossy().into_owned());
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            if full_path_display.starts_with(&local) {
+                full_path_display = full_path_display.replacen(&local, "<winLocalAppData>", 1);
+            }
+        }
         if let Some(total_size) = total {
             if last_phase.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                info!("【文件层进度】{{\"id\":\"{}\",\"done\":{},\"total\":{},\"percent\":0}}", file.file_path().display(), 0, total_size);
+                info!("【文件层进度】file=\"{}\" done=0/{} (0%) path=\"{}\"", id_display, total_size, full_path_display);
             }
         }
 
@@ -189,11 +219,11 @@ impl Downloader {
                         // Only log three times: start(0%), 50% (first time >=50), finish(100%)
                         if percent == 100 {
                             if last_phase.compare_exchange(0, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase.compare_exchange(1, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase.compare_exchange(2, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                                info!("【文件层进度】{{\"id\":\"{}\",\"done\":{},\"total\":{},\"percent\":{}}}", file.file_path().display(), downloaded.load(Ordering::Relaxed), total_size, percent);
+                                info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, downloaded.load(Ordering::Relaxed), total_size, percent, full_path_display);
                             }
                         } else if percent >= 50 {
                             if last_phase.compare_exchange(1, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase.compare_exchange(0, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                                info!("【文件层进度】{{\"id\":\"{}\",\"done\":{},\"total\":{},\"percent\":{}}}", file.file_path().display(), downloaded.load(Ordering::Relaxed), total_size, percent);
+                                info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, downloaded.load(Ordering::Relaxed), total_size, percent, full_path_display);
                             }
                         }
                     }
@@ -218,6 +248,8 @@ impl Downloader {
         file: &mut TempFile,
         is_stream: bool,
         concurrent_download: &ConcurrentDownloadLimit,
+        target: Option<&Path>,
+        kind: Option<&str>,
     ) -> Result<()> {
         let (concurrency, threshold) = (concurrent_download.concurrency, concurrent_download.threshold);
         let file_size = if is_stream {
@@ -230,7 +262,7 @@ impl Downloader {
                 .await?
                 .error_for_status_ext()?;
             if resp.status() != StatusCode::PARTIAL_CONTENT {
-                return self.fetch_serial(url, file).await;
+                return self.fetch_serial(url, file, target, kind).await;
             }
             resp.header_file_size()
         } else {
@@ -247,16 +279,16 @@ impl Downloader {
                 // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Accept-Ranges#none
                 .is_none_or(|v| v.to_str().unwrap_or_default() == "none")
             {
-                return self.fetch_serial(url, file).await;
+                return self.fetch_serial(url, file, target, kind).await;
             }
             resp.header_content_length()
         };
         let Some(file_size) = file_size else {
-            return self.fetch_serial(url, file).await;
+            return self.fetch_serial(url, file, target, kind).await;
         };
         let chunk_size = file_size / concurrency as u64;
         if chunk_size < threshold {
-            return self.fetch_serial(url, file).await;
+            return self.fetch_serial(url, file, target, kind).await;
         }
         file.set_len(file_size).await?;
         let mut tasks = JoinSet::new();
@@ -279,6 +311,8 @@ impl Downloader {
             let last_percent_cl = last_percent.clone();
             let last_phase_cl = last_phase.clone();
             let file_path_buf = file_clone.file_path().to_path_buf();
+                let target_cl = target.map(|p| p.to_path_buf());
+                let kind_cl = kind.map(|s| s.to_string());
             tasks.spawn(async move {
                 file_clone.seek(SeekFrom::Start(start)).await?;
                 let range_header = format!("bytes={}-{}", start, end);
@@ -298,6 +332,34 @@ impl Downloader {
                 }
                 let mut stream = resp.bytes_stream();
                 let mut part_received: u64 = 0;
+                // friendly id for logs: prefer target when available
+                let id_display = target_cl
+                    .as_ref()
+                    .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
+                    .or_else(|| file_path_buf.file_name().map(|s| s.to_string_lossy().into_owned()))
+                    .unwrap_or_else(|| file_path_buf.to_string_lossy().into_owned());
+                // file type: prefer explicit kind, fallback to target/temp extension
+                let file_type = kind_cl
+                    .as_deref()
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        target_cl
+                            .as_ref()
+                            .and_then(|p| p.extension().map(|s| s.to_string_lossy().into_owned()))
+                            .or_else(|| file_path_buf.extension().map(|s| s.to_string_lossy().into_owned()))
+                    })
+                    .map(|s| s.to_uppercase())
+                    .unwrap_or_else(|| "UNKNOWN".to_string());
+                // full path, simplify LOCALAPPDATA on Windows
+                let mut full_path_display = target_cl
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| file_path_buf.to_string_lossy().into_owned());
+                if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                    if full_path_display.starts_with(&local) {
+                        full_path_display = full_path_display.replacen(&local, "<winLocalAppData>", 1);
+                    }
+                }
                 while let Some(chunk) = stream.next().await {
                     let chunk = chunk.map_err(std::io::Error::other)?;
                     file_clone.write_all(&chunk).await?;
@@ -310,11 +372,11 @@ impl Downloader {
                         // Only log three times: start(0%), 50% (first time >=50), finish(100%)
                         if percent == 100 {
                             if last_phase_cl.compare_exchange(0, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase_cl.compare_exchange(1, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase_cl.compare_exchange(2, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                                info!("【文件层进度】{{\"id\":\"{}\",\"done\":{},\"total\":{},\"percent\":{}}}", file_path_buf.display(), downloaded_cl.load(Ordering::Relaxed), file_size, percent);
+                                info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, downloaded_cl.load(Ordering::Relaxed), file_size, percent, full_path_display);
                             }
                         } else if percent >= 50 {
                             if last_phase_cl.compare_exchange(1, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase_cl.compare_exchange(0, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                                info!("【文件层进度】{{\"id\":\"{}\",\"done\":{},\"total\":{},\"percent\":{}}}", file_path_buf.display(), downloaded_cl.load(Ordering::Relaxed), file_size, percent);
+                                info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, downloaded_cl.load(Ordering::Relaxed), file_size, percent, full_path_display);
                             }
                         }
                     }

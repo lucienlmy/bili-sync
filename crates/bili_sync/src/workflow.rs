@@ -675,7 +675,7 @@ pub async fn fetch_page_poster(
     }
 
     cx.downloader
-        .fetch(url, &poster_path, &cx.config.concurrent_limit.download)
+        .fetch(url, &poster_path, &cx.config.concurrent_limit.download, Some("封面"))
         .await?;
     if let Some(fanart_path) = fanart_path {
         let overwrite = !(cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_poster);
@@ -713,6 +713,7 @@ pub async fn fetch_page_video(
                     &mix_stream.urls(cx.config.cdn_sorting),
                     page_path,
                     &cx.config.concurrent_limit.download,
+                    Some("视频"),
                 )
                 .await?
         }
@@ -725,6 +726,7 @@ pub async fn fetch_page_video(
                     &video_stream.urls(cx.config.cdn_sorting),
                     page_path,
                     &cx.config.concurrent_limit.download,
+                    Some("视频"),
                 )
                 .await?
         }
@@ -738,6 +740,7 @@ pub async fn fetch_page_video(
                     &audio_stream.urls(cx.config.cdn_sorting),
                     page_path,
                     &cx.config.concurrent_limit.download,
+                    Some("视频"),
                 )
                 .await?
         }
@@ -845,7 +848,7 @@ pub async fn fetch_video_poster(
     }
 
     cx.downloader
-        .fetch(&video_model.cover, &poster_path, &cx.config.concurrent_limit.download)
+        .fetch(&video_model.cover, &poster_path, &cx.config.concurrent_limit.download, Some("封面"))
         .await?;
     let overwrite = !(cx.config.skip_option.no_overwrite && cx.config.skip_option.no_overwrite_poster);
     create_equivalent(&poster_path, &fanart_path, cx.config.skip_option.prefer_link_for_fanart, overwrite).await?;
@@ -873,6 +876,7 @@ pub async fn fetch_upper_face(
             &video_model.upper_face,
             &upper_face_path,
             &cx.config.concurrent_limit.download,
+            Some("头像"),
         )
         .await?;
     Ok(ExecutionStatus::Succeeded)

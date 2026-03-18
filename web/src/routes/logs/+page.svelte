@@ -11,7 +11,10 @@
 	let main: HTMLElement | null = null;
 	let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
-	function parseLayer(message: string): { layer: 'video' | 'page' | 'file' | null; text: string } {
+	function parseLayer(message: string): { layer: 'video' | 'page' | 'file' | 'file_progress' | null; text: string } {
+		if (message.startsWith('【文件层进度】')) {
+			return { layer: 'file_progress', text: message.replace('【文件层进度】', '').trim() };
+		}
 		if (message.startsWith('【视频层】')) {
 			return { layer: 'video', text: message.replace('【视频层】', '').trim() };
 		}
@@ -24,14 +27,16 @@
 		return { layer: null, text: message };
 	}
 
-	function getLayerClass(layer: 'video' | 'page' | 'file' | null) {
+	function getLayerClass(layer: 'video' | 'page' | 'file' | 'file_progress' | null) {
 		switch (layer) {
 			case 'video':
 				return 'bg-blue-50 text-blue-700 border border-blue-100';
 			case 'page':
 				return 'bg-indigo-50 text-indigo-700 border border-indigo-100';
 			case 'file':
-				return 'bg-emerald-50 text-emerald-700 border border-emerald-100';
+				return 'bg-emerald-100 text-emerald-700 border border-emerald-50';
+			case 'file_progress':
+				return 'bg-emerald-50/30 text-emerald-700 border border-emerald-50';
 			default:
 				return 'bg-transparent text-muted-foreground';
 		}
@@ -120,7 +125,13 @@
 				</Badge>
 				{#if parsed.layer}
 					<span class="px-2 py-0.5 rounded-md text-xs font-medium mr-2 {getLayerClass(parsed.layer)}">
-						{parsed.layer === 'video' ? '视频层' : parsed.layer === 'page' ? '分页层' : '文件层'}
+						{parsed.layer === 'video'
+							? '视频层'
+							: parsed.layer === 'page'
+							? '分页层'
+							: parsed.layer === 'file_progress'
+							? '文件层进度'
+							: '文件层'}
 					</span>
 				{/if}
 				<span class="flex-1 break-all">{parsed.text}</span>
