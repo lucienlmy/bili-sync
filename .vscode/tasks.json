@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "web: dev",
+      "type": "shell",
+      "command": "npm run dev",
+      "group": "build",
+      "presentation": { "reveal": "always" },
+      "problemMatcher": [],
+      "options": { "cwd": "${workspaceFolder}/web" }
+    },
+    {
+      "label": "web: build & embed",
+      "type": "shell",
+      "command": "npm run 一键npm和cargo:build:embed",
+      "group": "build",
+      "presentation": { "reveal": "always" },
+      "problemMatcher": [],
+      "options": { "cwd": "${workspaceFolder}/web" }
+    }
+    ,
+    {
+      "label": "backend: run (dev)",
+      "type": "shell",
+      "command": "cargo run -p bili_sync",
+      "group": "build",
+      "presentation": { "reveal": "always" },
+      "problemMatcher": [],
+      "options": { "cwd": "${workspaceFolder}/crates/bili_sync" }
+    }
+    ,
+    {
+      "label": "backend: stop",
+      "type": "shell",
+      "command": "taskkill /IM bili-sync-rs.exe /F",
+      "group": "build",
+      "presentation": { "reveal": "always" },
+      "problemMatcher": [],
+      "options": { "cwd": "${workspaceFolder}" }
+    }
+  ]
+}
