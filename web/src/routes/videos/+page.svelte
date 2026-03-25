@@ -12,7 +12,8 @@
 		VideoSourcesResponse,
 		ApiError,
 		VideoSource,
-		UpdateFilteredVideoStatusRequest
+		UpdateFilteredVideoStatusRequest,
+		VideoInfo
 	} from '$lib/types';
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
@@ -40,6 +41,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import StatusFilter from '$lib/components/status-filter.svelte';
 	import ValidationFilter from '$lib/components/validation-filter.svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 
 	const pageSize = 20;
 
@@ -73,7 +75,9 @@
 	}
 
 	let videoSources: VideoSourcesResponse | null = null;
+	let videoSourcesLoaded = false;
 	let filters: Record<string, Filter> | null = null;
+	let sourceMap: SvelteMap<string, { type: string; name: string }> = new SvelteMap();
 
 	function getApiParams(searchParams: URLSearchParams) {
 		let videoSource = null;
@@ -289,6 +293,22 @@
 		}
 	}
 
+	function getVideoSource(video: VideoInfo): { type: string; name: string } | null {
+		if (video.collection_id != null) {
+			return sourceMap.get(`collection:${video.collection_id}`) || null;
+		}
+		if (video.favorite_id != null) {
+			return sourceMap.get(`favorite:${video.favorite_id}`) || null;
+		}
+		if (video.submission_id != null) {
+			return sourceMap.get(`submission:${video.submission_id}`) || null;
+		}
+		if (video.watch_later_id != null) {
+			return sourceMap.get(`watch_later:${video.watch_later_id}`) || null;
+		}
+		return null;
+	}
+
 	// 获取筛选条件的显示数组
 	function getFilterDescriptionParts(): string[] {
 		const state = $appStateStore;
@@ -316,7 +336,7 @@
 			};
 			parts.push(`状态：${statusLabels[state.statusFilter]}`);
 		}
-		if (state.validationFilter && state.validationFilter !== 'normal') {
+		if (state.validationFilter) {
 			const validationLabels = {
 				skipped: '跳过',
 				invalid: '失效',
@@ -327,7 +347,7 @@
 		return parts;
 	}
 
-	$: if ($page.url.search !== lastSearch) {
+	$: if (videoSourcesLoaded && $page.url.search !== lastSearch) {
 		lastSearch = $page.url.search;
 		handleSearchParamsChange($page.url.searchParams);
 	}
@@ -347,8 +367,19 @@
 				}
 			])
 		);
+		sourceMap.clear();
+		for (const source of Object.values(VIDEO_SOURCES)) {
+			const sourceList = videoSources[source.type as keyof VideoSourcesResponse] as VideoSource[];
+			for (const item of sourceList) {
+				sourceMap.set(`${source.type}:${item.id}`, {
+					type: source.type,
+					name: item.name
+				});
+			}
+		}
 	} else {
 		filters = null;
+		sourceMap.clear();
 	}
 
 	onMount(async () => {
@@ -358,6 +389,7 @@
 			}
 		]);
 		videoSources = (await api.getVideoSources()).data;
+		videoSourcesLoaded = true;
 	});
 
 	$: totalPages = videosData ? Math.ceil(videosData.total_count / pageSize) : 0;
@@ -396,6 +428,22 @@
 		}}
 	></SearchBar>
 	<div class="flex items-center gap-3">
+		<div class="flex items-center gap-1">
+			<span class="text-muted-foreground text-xs">有效性:</span>
+			<ValidationFilter
+				value={$appStateStore.validationFilter}
+				onSelect={(value) => {
+					setValidationFilter(value);
+					resetCurrentPage();
+					goto(`/${ToQuery($appStateStore)}`);
+				}}
+				onRemove={() => {
+					setValidationFilter(null);
+					resetCurrentPage();
+					goto(`/${ToQuery($appStateStore)}`);
+				}}
+			/>
+		</div>
 		<!-- 状态筛选 -->
 		<div class="flex items-center gap-1">
 			<span class="text-muted-foreground text-xs">状态:</span>
@@ -408,22 +456,6 @@
 				}}
 				onRemove={() => {
 					setStatusFilter(null);
-					resetCurrentPage();
-					goto(`/${ToQuery($appStateStore)}`);
-				}}
-			/>
-		</div>
-		<div class="flex items-center gap-1">
-			<span class="text-muted-foreground text-xs">有效性:</span>
-			<ValidationFilter
-				value={$appStateStore.validationFilter}
-				onSelect={(value) => {
-					setValidationFilter(value);
-					resetCurrentPage();
-					goto(`/${ToQuery($appStateStore)}`);
-				}}
-				onRemove={() => {
-					setValidationFilter(null);
 					resetCurrentPage();
 					goto(`/${ToQuery($appStateStore)}`);
 				}}
@@ -506,11 +538,12 @@
 	<div
 		class="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"
 	>
-		{#each videosData.videos as video (video.id)}
-			<VideoCard
-				{video}
-				{deleteMode}
-				{isDKeyPressed}
+			{#each videosData.videos as video (video.id)}
+				<VideoCard
+					{video}
+					source={getVideoSource(video)}
+					{deleteMode}
+					{isDKeyPressed}
 				onReset={async (forceReset: boolean) => {
 					await handleResetVideo(video.id, forceReset);
 				}}

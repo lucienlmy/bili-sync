@@ -36,6 +36,10 @@ export interface VideoInfo {
 	valid: boolean;
 	should_download: boolean;
 	download_status: [number, number, number, number, number];
+	collection_id?: number;
+	favorite_id?: number;
+	submission_id?: number;
+	watch_later_id?: number;
 }
 
 export interface VideosResponse {
@@ -87,7 +91,16 @@ export interface UpdateFilteredVideoStatusResponse {
 
 export interface ApiError {
 	message: string;
-	status?: number;
+	status: number;
+}
+
+export interface FullSyncVideoSourceRequest {
+	delete_local: boolean;
+}
+
+export interface FullSyncVideoSourceResponse {
+	removed_count: number;
+	warnings?: string[];
 }
 
 export interface StatusUpdate {
@@ -202,7 +215,7 @@ export interface RuleTarget<T> {
 	rule: Condition<T> | RuleTarget<T>;
 }
 
-export type AndGroup = RuleTarget<string | number | Date>[];
+export type AndGroup = RuleTarget<string | number | boolean | Date>[];
 export type Rule = AndGroup[];
 
 export interface VideoSourceDetail {

@@ -16,12 +16,6 @@ pub struct FavoriteListInfo {
     pub title: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub struct Upper<T> {
-    pub mid: T,
-    pub name: String,
-    pub face: String,
-}
 impl<'a> FavoriteList<'a> {
     pub fn new(client: &'a BiliClient, fid: String, credential: &'a Credential) -> Self {
         Self {
@@ -85,6 +79,9 @@ impl<'a> FavoriteList<'a> {
                     .with_context(|| format!("failed to get videos of favorite {} page {}", self.fid, page))?;
                 let medias = &mut videos["data"]["medias"];
                 if medias.as_array().is_none_or(|v| v.is_empty()) {
+                    if page == 1 {
+                        break;
+                    }
                     Err(anyhow!("no medias found in favorite {} page {}", self.fid, page))?;
                 }
                 let videos_info: Vec<VideoInfo> = serde_json::from_value(medias.take())

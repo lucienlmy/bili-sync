@@ -212,11 +212,15 @@ pub async fn clear_and_reset_video_status(
         .await?;
     txn.commit().await?;
     let video_info = video_info.try_into_model()?;
-    let warning = tokio::fs::remove_dir_all(&video_info.path)
-        .await
-        .context(format!("删除本地路径「{}」失败", video_info.path))
-        .err()
-        .map(|e| format!("{:#}", e));
+    let warning = if video_info.path.is_empty() {
+        None
+    } else {
+        tokio::fs::remove_dir_all(&video_info.path)
+            .await
+            .context(format!("删除本地路径「{}」失败", video_info.path))
+            .err()
+            .map(|e| format!("{:#}", e))
+    };
     Ok(ApiResponse::ok(ClearAndResetVideoStatusResponse {
         warning,
         video: VideoInfo {
@@ -228,6 +232,10 @@ pub async fn clear_and_reset_video_status(
             valid: video_info.valid,
             should_download: video_info.should_download,
             download_status: video_info.download_status,
+            collection_id: video_info.collection_id,
+            favorite_id: video_info.favorite_id,
+            submission_id: video_info.submission_id,
+            watch_later_id: video_info.watch_later_id,
         },
     }))
 }

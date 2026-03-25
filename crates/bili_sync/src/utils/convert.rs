@@ -133,6 +133,7 @@ impl VideoInfo {
                 intro,
                 cover,
                 upper,
+                staff,
                 ctime,
                 pubtime,
                 state,
@@ -165,6 +166,7 @@ impl VideoInfo {
                 upper_id: Set(upper.mid),
                 upper_name: Set(upper.name),
                 upper_face: Set(upper.face),
+                staff: Set(staff.map(Into::into)),
                 ..base_model.into_active_model()
             },
             _ => unreachable!(),
@@ -180,6 +182,17 @@ impl VideoInfo {
             | VideoInfo::Submission { ctime: time, .. }
             | VideoInfo::Dynamic { pubtime: time, .. } => time,
             VideoInfo::Detail { .. } => unreachable!(),
+        }
+    }
+
+    pub fn bvid_owned(self) -> String {
+        match self {
+            VideoInfo::Collection { bvid, .. }
+            | VideoInfo::Favorite { bvid, .. }
+            | VideoInfo::WatchLater { bvid, .. }
+            | VideoInfo::Submission { bvid, .. }
+            | VideoInfo::Dynamic { bvid, .. }
+            | VideoInfo::Detail { bvid, .. } => bvid,
         }
     }
 }

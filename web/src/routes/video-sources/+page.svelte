@@ -4,6 +4,7 @@
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
+	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
 	import * as Tabs from '$lib/components/ui/tabs/index.js';
@@ -18,7 +19,8 @@
 		InfoIcon,
 		Trash2Icon,
 		CircleCheckBigIcon,
-		CircleXIcon
+		CircleXIcon,
+		RefreshCwIcon
 	} from '@lucide/svelte/icons';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { toast } from 'svelte-sonner';
@@ -58,6 +60,13 @@
 	let removeType = '';
 	let removeIdx: number = 0;
 	let removing = false;
+
+	// 全量更新对话框状态
+	let showFullSyncDialog = false;
+	let fullSyncSource: VideoSourceDetail | null = null;
+	let fullSyncType = '';
+	let fullSyncDeleteLocal = false;
+	let fullSyncing = false;
 
 	// 编辑表单数据
 	let editForm = {
@@ -119,6 +128,44 @@
 		removeType = type;
 		removeIdx = idx;
 		showRemoveDialog = true;
+	}
+
+	function openFullSyncDialog(type: string, source: VideoSourceDetail) {
+		fullSyncSource = source;
+		fullSyncType = type;
+		fullSyncDeleteLocal = false;
+		showFullSyncDialog = true;
+	}
+
+	async function fullSyncVideoSource() {
+		if (!fullSyncSource) return;
+		fullSyncing = true;
+		try {
+			let response = await api.fullSyncVideoSource(fullSyncType, fullSyncSource.id, {
+				delete_local: fullSyncDeleteLocal
+			});
+			if (response && response.data) {
+				showFullSyncDialog = false;
+				toast.success('全量更新成功', {
+					description: `已移除 ${response.data.removed_count} 个不存在的视频`
+				});
+				if (response.data.warnings && response.data.warnings.length > 0) {
+					toast.warning('部分本地文件夹删除失败', {
+						description: response.data.warnings.join('\n'),
+						duration: 10000,
+						descriptionClass: 'whitespace-pre-line'
+					});
+				}
+			} else {
+				toast.error('全量更新失败');
+			}
+		} catch (error) {
+			toast.error('全量更新失败', {
+				description: (error as ApiError).message
+			});
+		} finally {
+			fullSyncing = false;
+		}
 	}
 
 	// 保存编辑
@@ -460,6 +507,21 @@
 														<p class="text-xs">重新评估规则</p>
 													</Tooltip.Content>
 												</Tooltip.Root>
+												<Tooltip.Root disableHoverableContent={true}>
+													<Tooltip.Trigger>
+														<Button
+															size="sm"
+															variant="outline"
+															onclick={() => openFullSyncDialog(key, source)}
+															class="h-8 w-8 p-0"
+														>
+															<RefreshCwIcon class="h-3 w-3" />
+														</Button>
+													</Tooltip.Trigger>
+													<Tooltip.Content>
+														<p class="text-xs">全量更新视频</p>
+													</Tooltip.Content>
+												</Tooltip.Root>
 												{#if activeTab !== 'watch_later'}
 													<Tooltip.Root disableHoverableContent={true}>
 														<Tooltip.Trigger>
@@ -626,6 +688,48 @@
 				>
 				<AlertDialog.Action onclick={removeVideoSource} disabled={removing}>
 					{removing ? '删除中' : '删除'}
+				</AlertDialog.Action>
+			</AlertDialog.Footer>
+		</AlertDialog.Content>
+	</AlertDialog.Root>
+
+	<AlertDialog.Root bind:open={showFullSyncDialog}>
+		<AlertDialog.Content>
+			<AlertDialog.Header>
+				<AlertDialog.Title>全量更新视频</AlertDialog.Title>
+				<AlertDialog.Description>
+					确定要全量更新视频源 <strong>"{fullSyncSource?.name}"</strong> 吗？<br />
+					该操作会获取该视频源下所有当前存在的视频，移除数据库中已不存在于该源的视频及其分页数据，<span
+						class="text-destructive font-medium">无法撤销</span
+					>。<br /><br />
+					请谨慎对“稍后再看”执行全量更新操作，因为其视频源本身就具有较强的时效性，执行全量更新可能导致大量视频被移除。<br
+					/>
+				</AlertDialog.Description>
+			</AlertDialog.Header>
+			<div class="rounded-lg border border-orange-200 bg-orange-50 p-3">
+				<div class="mb-2 flex items-center space-x-2">
+					<Checkbox id="delete-local" bind:checked={fullSyncDeleteLocal} />
+					<Label for="delete-local" class="text-sm font-medium text-orange-700">
+						⚠️ 同时删除本地视频文件夹
+					</Label>
+				</div>
+				<p class="text-xs leading-relaxed text-orange-700">
+					删除多余视频时同时删除视频对应的本地文件夹，请谨慎勾选
+				</p>
+			</div>
+			<AlertDialog.Footer>
+				<AlertDialog.Cancel
+					disabled={fullSyncing}
+					onclick={() => {
+						showFullSyncDialog = false;
+					}}>取消</AlertDialog.Cancel
+				>
+				<AlertDialog.Action
+					onclick={fullSyncVideoSource}
+					disabled={fullSyncing}
+					class="bg-amber-600 hover:bg-amber-700"
+				>
+					{fullSyncing ? '全量更新中' : '确认全量更新'}
 				</AlertDialog.Action>
 			</AlertDialog.Footer>
 		</AlertDialog.Content>
