@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { toast } from 'svelte-sonner';
 	import type { Notifier } from '$lib/types';
-
-	const jsonExample = '{"text": "您的消息内容"}';
 
 	export let notifier: Notifier | null = null;
 	export let onSave: (notifier: Notifier) => void;
@@ -14,8 +13,10 @@
 	let type: 'telegram' | 'webhook' = 'telegram';
 	let botToken = '';
 	let chatId = '';
+	let skipImage = false;
 	let webhookUrl = '';
 	let webhookTemplate = '';
+	let webhookHeaders: { key: string; value: string }[] = [];
 
 	// 初始化表单
 	$: {
@@ -24,22 +25,29 @@
 				type = 'telegram';
 				botToken = notifier.bot_token;
 				chatId = notifier.chat_id;
+				skipImage = notifier.skip_image;
 			} else {
 				type = 'webhook';
 				webhookUrl = notifier.url;
 				webhookTemplate = notifier.template || '';
+				if (notifier.headers) {
+					webhookHeaders = Object.entries(notifier.headers).map(([key, value]) => ({ key, value }));
+				} else {
+					webhookHeaders = [];
+				}
 			}
 		} else {
 			type = 'telegram';
 			botToken = '';
 			chatId = '';
+			skipImage = false;
 			webhookUrl = '';
 			webhookTemplate = '';
+			webhookHeaders = [];
 		}
 	}
 
 	function handleSave() {
-		// 验证表单
 		if (type === 'telegram') {
 			if (!botToken.trim()) {
 				toast.error('请输入 Bot Token');
@@ -53,7 +61,8 @@
 			const newNotifier: Notifier = {
 				type: 'telegram',
 				bot_token: botToken.trim(),
-				chat_id: chatId.trim()
+				chat_id: chatId.trim(),
+				skip_image: skipImage
 			};
 			onSave(newNotifier);
 		} else {
@@ -62,7 +71,6 @@
 				return;
 			}
 
-			// 简单的 URL 验证
 			try {
 				new URL(webhookUrl.trim());
 			} catch {
@@ -70,10 +78,20 @@
 				return;
 			}
 
+			const headers: Record<string, string> = {};
+			for (const { key, value } of webhookHeaders) {
+				const trimmedKey = key.trim();
+				const trimmedValue = value.trim();
+				if (trimmedKey && trimmedValue) {
+					headers[trimmedKey] = trimmedValue;
+				}
+			}
+
 			const newNotifier: Notifier = {
 				type: 'webhook',
 				url: webhookUrl.trim(),
-				template: webhookTemplate.trim() || null
+				template: webhookTemplate.trim() || null,
+				headers: Object.keys(headers).length > 0 ? headers : null
 			};
 			onSave(newNotifier);
 		}
@@ -108,14 +126,14 @@
 			<Input id="chat-id" placeholder="-1001234567890" bind:value={chatId} />
 			<p class="text-muted-foreground text-xs">目标聊天室的 ID（个人用户、群组或频道）</p>
 		</div>
+		<div class="flex items-center gap-2">
+			<Checkbox id="skip-image" bind:checked={skipImage} />
+			<Label for="skip-image" class="text-sm font-normal">仅发送文字</Label>
+		</div>
 	{:else if type === 'webhook'}
 		<div class="space-y-2">
 			<Label for="webhook-url">Webhook URL</Label>
-			<Input id="webhook-url" placeholder="https://example.com/webhook" bind:value={webhookUrl} />
-			<p class="text-muted-foreground text-xs">
-				接收通知的 Webhook 地址<br />
-				格式示例：{jsonExample}
-			</p>
+			<Input id="webhook-url" placeholder="请输入 Webhook 地址" bind:value={webhookUrl} />
 		</div>
 		<div class="space-y-2">
 			<Label for="webhook-template">模板（可选）</Label>
@@ -127,7 +145,48 @@
 			></textarea>
 			<p class="text-muted-foreground text-xs">
 				用于渲染 Webhook 的 Handlebars 模板。如果不填写，将使用默认模板。<br />
-				可用变量：<code class="text-xs">message</code>（通知内容）
+				可用变量：<code class="text-xs">message</code>（通知内容）、<code class="text-xs"
+					>image_url</code
+				>（封面图片地址，无图时为 null）
+			</p>
+		</div>
+
+		<div class="space-y-2">
+			<div class="flex items-center justify-between">
+				<Label>自定义请求头（可选）</Label>
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={() => (webhookHeaders = [...webhookHeaders, { key: '', value: '' }])}
+				>
+					+ 添加请求头
+				</Button>
+			</div>
+			{#each webhookHeaders as header, index (index)}
+				<div class="flex items-center gap-2">
+					<Input
+						placeholder="Header 名称（例如 Authorization）"
+						bind:value={header.key}
+						class="flex-1"
+					/>
+					<Input
+						placeholder="Header 值"
+						bind:value={header.value}
+						class="flex-1"
+						type={header.key.toLowerCase() === 'authorization' ? 'password' : 'text'}
+					/>
+					<Button
+						variant="ghost"
+						size="sm"
+						onclick={() => (webhookHeaders = webhookHeaders.filter((_, i) => i !== index))}
+						class="h-10 px-2"
+					>
+						×
+					</Button>
+				</div>
+			{/each}
+			<p class="text-muted-foreground text-xs">
+				添加自定义请求头，例如：Authorization: Bearer your_token
 			</p>
 		</div>
 	{/if}

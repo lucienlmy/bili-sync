@@ -1,6 +1,8 @@
 mod info;
 mod message;
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use futures::future;
 pub use info::DownloadNotifyInfo;
@@ -16,10 +18,14 @@ pub enum Notifier {
     Telegram {
         bot_token: String,
         chat_id: String,
+        #[serde(default)]
+        skip_image: bool,
     },
     Webhook {
         url: String,
         template: Option<String>,
+        #[serde(default)]
+        headers: Option<HashMap<String, String>>,
         #[serde(skip)]
         // 一个内部辅助字段，用于决定是否强制渲染当前模板，在测试时使用
         ignore_cache: Option<()>,
@@ -56,8 +62,14 @@ impl Notifier {
 
     async fn notify_internal<'a>(&self, client: &reqwest::Client, message: &Message<'a>) -> Result<()> {
         match self {
-            Notifier::Telegram { bot_token, chat_id } => {
-                if let Some(img_url) = &message.image_url {
+            Notifier::Telegram {
+                bot_token,
+                chat_id,
+                skip_image,
+            } => {
+                if let Some(img_url) = &message.image_url
+                    && !*skip_image
+                {
                     let url = format!("https://api.telegram.org/bot{}/sendPhoto", bot_token);
                     let params = [
                         ("chat_id", chat_id.as_str()),
@@ -74,6 +86,7 @@ impl Notifier {
             Notifier::Webhook {
                 url,
                 template,
+                headers,
                 ignore_cache,
             } => {
                 let key = webhook_template_key(url);
@@ -82,12 +95,20 @@ impl Notifier {
                     Some(_) => handlebar.render_template(webhook_template_content(template), &message)?,
                     None => handlebar.render(&key, &message)?,
                 };
-                client
-                    .post(url)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(payload)
-                    .send()
-                    .await?;
+                let mut headers_map = header::HeaderMap::new();
+                headers_map.insert(header::CONTENT_TYPE, "application/json".try_into()?);
+
+                if let Some(custom_headers) = headers {
+                    for (key, value) in custom_headers {
+                        if let (Ok(key), Ok(value)) =
+                            (header::HeaderName::try_from(key), header::HeaderValue::try_from(value))
+                        {
+                            headers_map.insert(key, value);
+                        }
+                    }
+                }
+
+                client.post(url).headers(headers_map).body(payload).send().await?;
             }
         }
         Ok(())
