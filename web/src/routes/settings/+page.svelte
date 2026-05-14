@@ -684,7 +684,18 @@
 									</div>
 									{#if formData.skip_option.no_overwrite}
 										<div class="pl-6 mt-2 space-y-2">
-											<p class="text-muted-foreground text-sm">细粒度控制：启用后可针对以下资源独立设置不覆盖策略</p>
+											<Tooltip.Root>
+												<Tooltip.Trigger asChild>
+													<p class="text-muted-foreground text-sm cursor-help">细粒度控制：启用后可针对以下资源独立设置不覆盖策略（开启则不覆盖）</p>
+												</Tooltip.Trigger>
+												<Tooltip.Content class="max-w-xs">
+													<ul class="text-xs space-y-1 list-disc list-inside">
+														<li><strong>主开关关闭</strong>：所有文件都会被覆盖（细粒度无效）</li>
+														<li><strong>主开关开启 + 细粒度关闭</strong>：该类型文件会被覆盖</li>
+														<li><strong>主开关开启 + 细粒度开启</strong>：该类型文件不会被覆盖，跳过下载</li>
+													</ul>
+												</Tooltip.Content>
+											</Tooltip.Root>
 											<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
 												<div class="flex items-center space-x-2">
 													<Switch id="no-overwrite-video" bind:checked={formData.skip_option.no_overwrite_video} />
