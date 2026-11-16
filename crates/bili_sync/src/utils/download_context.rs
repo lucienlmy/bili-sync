@@ -1,12 +1,12 @@
 use sea_orm::DatabaseConnection;
 
-use crate::adapter::VideoSourceEnum;
+use crate::adapter::{VideoSource, VideoSourceEnum};
 use crate::bilibili::{BiliClient, FilterOption};
 use crate::config::Config;
 use crate::config::SkipOption;
 use crate::downloader::Downloader;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct DownloadContext<'a> {
     pub bili_client: &'a BiliClient,
     pub video_source: &'a VideoSourceEnum,
@@ -30,6 +30,7 @@ impl<'a> DownloadContext<'a> {
     ) -> Self {
         let skip_option = video_source
             .skip_option()
+            .as_ref()
             .and_then(|s| serde_json::from_str(s).ok());
 
         Self {

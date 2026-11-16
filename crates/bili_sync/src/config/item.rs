@@ -60,7 +60,7 @@ impl Default for ConcurrentLimit {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct SkipOption {
     pub no_poster: bool,
     pub no_video_nfo: bool,

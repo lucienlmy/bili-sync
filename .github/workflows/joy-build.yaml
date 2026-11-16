@@ -1,0 +1,42 @@
+name: Joy Branch Build
+
+# Joy 分支专用构建：手动触发 + push 触发，产物上传到 prerelease
+# 用途：验证 Joy 分支（含从 main 合并的改动）能否正常构建，exe 可直接下载测试
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - Joy
+
+jobs:
+  # 复用项目本地的多平台构建工作流（Linux/macOS/Windows 全套产物）
+  # 不用上游 amtoaer/bili-sync@main 的版本，避免构建定义与本仓库不同步
+  build-binary:
+    uses: ./.github/workflows/build-binary.yaml
+
+  # 把构建产物上传为 prerelease，tag 按运行号区分，避免污染正式发版
+  upload-prerelease:
+    name: Upload Joy build to prerelease
+    needs: build-binary
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: joy-build-${{ github.run_number }}
+          name: Joy build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: true
+          make_latest: false
+          files: bili-sync-rs*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

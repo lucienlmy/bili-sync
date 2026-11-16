@@ -281,7 +281,6 @@ impl Downloader {
         let url = Arc::new(url.to_string());
         // shared counters for progress reporting
         let downloaded = Arc::new(AtomicU64::new(0));
-        let last_percent = Arc::new(AtomicU64::new(0));
         // 0: none, 1: start logged, 2: 50% logged, 3: finished logged
         let last_phase = Arc::new(AtomicU64::new(0));
         for i in 0..concurrency {
@@ -294,7 +293,6 @@ impl Downloader {
             let (url_clone, client_clone) = (url.clone(), self.client.clone());
             let mut file_clone = file.open_rw().await?;
             let downloaded_cl = downloaded.clone();
-            let last_percent_cl = last_percent.clone();
             let last_phase_cl = last_phase.clone();
             let file_path_buf = file_clone.file_path().to_path_buf();
                 let target_cl = target.map(|p| p.to_path_buf());
