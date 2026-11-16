@@ -11,7 +11,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Favorite::Table)
-                    .add_column(string(Favorite::SkipOption).null())
+                    .add_column(ColumnDef::new(Favorite::SkipOption).string().null())
                     .to_owned(),
             )
             .await?;
@@ -20,7 +20,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Collection::Table)
-                    .add_column(string(Collection::SkipOption).null())
+                    .add_column(ColumnDef::new(Collection::SkipOption).string().null())
                     .to_owned(),
             )
             .await?;
@@ -29,7 +29,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Submission::Table)
-                    .add_column(string(Submission::SkipOption).null())
+                    .add_column(ColumnDef::new(Submission::SkipOption).string().null())
                     .to_owned(),
             )
             .await?;
@@ -38,7 +38,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(WatchLater::Table)
-                    .add_column(string(WatchLater::SkipOption).null())
+                    .add_column(ColumnDef::new(WatchLater::SkipOption).string().null())
                     .to_owned(),
             )
             .await
