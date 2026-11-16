@@ -13,21 +13,19 @@
 	import CloudDownloadIcon from '@lucide/svelte/icons/cloud-download';
 	import api from '$lib/api';
 	import type { DashBoardResponse, SysInfo, ApiError, TaskStatus } from '$lib/types';
-	import {
-		DatabaseIcon,
-		HeartIcon,
-		FolderIcon,
-		UserIcon,
-		ClockIcon,
-		VideoIcon,
-		HardDriveIcon,
-		CpuIcon,
-		MemoryStickIcon,
-		PlayIcon,
-		CircleCheckBigIcon,
-		CalendarIcon,
-		DownloadIcon
-	} from '@lucide/svelte/icons';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import CircleCheckBigIcon from '@lucide/svelte/icons/circle-check-big';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import CpuIcon from '@lucide/svelte/icons/cpu';
+	import DatabaseIcon from '@lucide/svelte/icons/database';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import FolderIcon from '@lucide/svelte/icons/folder';
+	import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
+	import HeartIcon from '@lucide/svelte/icons/heart';
+	import MemoryStickIcon from '@lucide/svelte/icons/memory-stick';
+	import PlayIcon from '@lucide/svelte/icons/play';
+	import UserIcon from '@lucide/svelte/icons/user';
+	import VideoIcon from '@lucide/svelte/icons/video';
 
 	let dashboardData = $state<DashBoardResponse | null>(null);
 	let sysInfo = $state<SysInfo | null>(null);
@@ -288,8 +286,8 @@
 									xAxis: { format: () => '' }
 								}}
 							>
-								{#snippet tooltip()}
-									<MyChartTooltip indicator="line" />
+								{#snippet tooltip({ context })}
+									<MyChartTooltip {context} indicator="line" />
 								{/snippet}
 							</BarChart>
 						</Chart.Container>
@@ -443,8 +441,9 @@
 									}
 								}}
 							>
-								{#snippet tooltip()}
+								{#snippet tooltip({ context })}
 									<MyChartTooltip
+										{context}
 										labelFormatter={(timestamp: number) => {
 											return formatTimestamp(timestamp);
 										}}
@@ -505,8 +504,9 @@
 									}
 								}}
 							>
-								{#snippet tooltip()}
+								{#snippet tooltip({ context })}
 									<MyChartTooltip
+										{context}
 										labelFormatter={(timestamp: number) => {
 											return formatTimestamp(timestamp);
 										}}

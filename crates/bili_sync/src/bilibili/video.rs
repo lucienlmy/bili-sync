@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use futures::TryStreamExt;
 use futures::stream::FuturesUnordered;
 use prost::Message;
@@ -101,12 +101,20 @@ impl<'a> Video<'a> {
             .json::<serde_json::Value>()
             .await?
             .validate()?;
-        Ok(res["data"]
+        res["data"]
             .as_array_mut()
             .context("tags is not an array")?
             .iter_mut()
-            .filter_map(|v| if let Value::String(s) = v.take() { Some(s) } else { None })
-            .collect())
+            .map(|v| {
+                if let Some(tag) = v.get_mut("tag_name")
+                    && let Value::String(s) = tag.take()
+                {
+                    Ok(s)
+                } else {
+                    bail!("tag_name is not a string");
+                }
+            })
+            .collect()
     }
 
     pub async fn get_danmaku_writer(&self, page: &'a PageInfo) -> Result<DanmakuWriter<'a>> {
@@ -205,7 +213,7 @@ impl<'a> Video<'a> {
         let mut res = self
             .client
             .client // 这里可以直接使用 inner_client，因为该请求不需要鉴权
-            .request(Method::GET, format!("https:{}", &info.subtitle_url).as_str(), None)
+            .request(Method::GET, format!("https:{}", info.subtitle_url).as_str(), None)
             .send()
             .await?
             .error_for_status_ext()?

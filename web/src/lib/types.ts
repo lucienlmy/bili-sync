@@ -11,6 +11,8 @@ export interface VideosRequest {
 	query?: string;
 	status_filter?: 'failed' | 'succeeded' | 'waiting';
 	validation_filter?: 'skipped' | 'invalid' | 'normal';
+	created_from?: string;
+	created_to?: string;
 	page?: number;
 	page_size?: number;
 }
@@ -126,6 +128,8 @@ export interface UpdateFilteredVideoStatusRequest {
 	query?: string;
 	status_filter?: 'failed' | 'succeeded' | 'waiting';
 	validation_filter?: 'skipped' | 'invalid' | 'normal';
+	created_from?: string;
+	created_to?: string;
 	video_updates?: StatusUpdate[];
 	page_updates?: StatusUpdate[];
 }
@@ -142,6 +146,8 @@ export interface ResetFilteredVideoStatusRequest {
 	query?: string;
 	status_filter?: 'failed' | 'succeeded' | 'waiting';
 	validation_filter?: 'skipped' | 'invalid' | 'normal';
+	created_from?: string;
+	created_to?: string;
 	force: boolean;
 }
 
@@ -224,6 +230,7 @@ export interface VideoSourceDetail {
 	path: string;
 	rule: Rule | null;
 	ruleDisplay: string | null;
+	filterOption: FilterOption | null;
 	useDynamicApi: boolean | null;
 	enabled: boolean;
 	latestRowAt: string | null;
@@ -241,6 +248,7 @@ export interface UpdateVideoSourceRequest {
 	path: string;
 	enabled: boolean;
 	rule?: Rule | null;
+	filterOption?: FilterOption | null;
 	useDynamicApi?: boolean | null;
 	skipOption?: string | null;
 }
@@ -279,6 +287,15 @@ export interface DanmakuOption {
 	outline: number;
 	time_offset: number;
 }
+
+export interface DanmakuUpdatePolicy {
+	enabled: boolean;
+	milestones: DanmakuUpdateMilestone[];
+}
+
+export type DanmakuUpdateMilestone =
+	| { type: 'once'; at_days: number }
+	| { type: 'periodic'; until_days: number; interval_hours: number };
 
 export interface SkipOption {
 	no_poster: boolean;
@@ -330,7 +347,18 @@ export interface WebhookNotifier {
 	headers?: Record<string, string> | null;
 }
 
-export type Notifier = TelegramNotifier | WebhookNotifier;
+export interface SmtpNotifier {
+	type: 'smtp';
+	host: string;
+	port: number;
+	encryption: 'none' | 'tls' | 'starttls';
+	username: string;
+	password: string;
+	from: string;
+	to: string;
+}
+
+export type Notifier = TelegramNotifier | WebhookNotifier | SmtpNotifier;
 
 export type Trigger = number | string;
 
@@ -340,10 +368,12 @@ export interface Config {
 	credential: Credential;
 	filter_option: FilterOption;
 	danmaku_option: DanmakuOption;
+	danmaku_update_policy: DanmakuUpdatePolicy;
 	skip_option: SkipOption;
 	video_name: string;
 	page_name: string;
 	notifiers: Notifier[] | null;
+	ignore_common_errors: boolean;
 	favorite_default_path: string;
 	collection_default_path: string;
 	submission_default_path: string;

@@ -1,8 +1,9 @@
 use bili_sync_entity::rule::Rule;
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use crate::bilibili::CollectionType;
+use crate::bilibili::{CollectionType, FilterOption};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -29,6 +30,8 @@ pub struct VideosRequest {
     pub query: Option<String>,
     pub status_filter: Option<StatusFilter>,
     pub validation_filter: Option<ValidationFilter>,
+    pub created_from: Option<NaiveDateTime>,
+    pub created_to: Option<NaiveDateTime>,
     pub page: Option<u64>,
     pub page_size: Option<u64>,
 }
@@ -48,6 +51,8 @@ pub struct ResetFilteredVideoStatusRequest {
     pub query: Option<String>,
     pub status_filter: Option<StatusFilter>,
     pub validation_filter: Option<ValidationFilter>,
+    pub created_from: Option<NaiveDateTime>,
+    pub created_to: Option<NaiveDateTime>,
     #[serde(default)]
     pub force: bool,
 }
@@ -86,6 +91,8 @@ pub struct UpdateFilteredVideoStatusRequest {
     pub query: Option<String>,
     pub status_filter: Option<StatusFilter>,
     pub validation_filter: Option<ValidationFilter>,
+    pub created_from: Option<NaiveDateTime>,
+    pub created_to: Option<NaiveDateTime>,
     #[serde(default)]
     #[validate(nested)]
     pub video_updates: Vec<StatusUpdate>,
@@ -138,6 +145,7 @@ pub struct UpdateVideoSourceRequest {
     pub path: String,
     pub enabled: bool,
     pub rule: Option<Rule>,
+    pub filter_option: Option<FilterOption>,
     pub use_dynamic_api: Option<bool>,
     pub skip_option: Option<String>,
 }

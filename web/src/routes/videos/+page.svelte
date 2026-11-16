@@ -3,7 +3,8 @@
 	import Pagination from '$lib/components/pagination.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
-	import { SquarePenIcon, RotateCcwIcon } from '@lucide/svelte/icons';
+	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
+	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
 	import api from '$lib/api';
 	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
@@ -25,6 +26,7 @@
 		resetCurrentPage,
 		setAll,
 		setCurrentPage,
+		setCreatedTimeFilter,
 		setQuery,
 		setStatusFilter,
 		setValidationFilter,
@@ -41,6 +43,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import StatusFilter from '$lib/components/status-filter.svelte';
 	import ValidationFilter from '$lib/components/validation-filter.svelte';
+	import CreatedTimeFilter from '$lib/components/created-time-filter.svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 
 	const pageSize = 20;
@@ -107,6 +110,8 @@
 			videoSource,
 			statusFilter,
 			validationFilter,
+			createdFrom: searchParams.get('created_from'),
+			createdTo: searchParams.get('created_to'),
 			pageNum: parseInt(searchParams.get('page') || '0')
 		};
 	}
@@ -116,7 +121,9 @@
 		pageNum: number = 0,
 		filter?: { type: string; id: string } | null,
 		statusFilter: StatusFilterValue | null = null,
-		validationFilter: ValidationFilterValue | null = null
+		validationFilter: ValidationFilterValue | null = null,
+		createdFrom: string | null = null,
+		createdTo: string | null = null
 	) {
 		loading = true;
 		try {
@@ -136,6 +143,12 @@
 			if (validationFilter) {
 				params.validation_filter = validationFilter;
 			}
+			if (createdFrom) {
+				params.created_from = createdFrom;
+			}
+			if (createdTo) {
+				params.created_to = createdTo;
+			}
 			const result = await api.getVideos(params);
 			videosData = result.data;
 		} catch (error) {
@@ -148,16 +161,37 @@
 		}
 	}
 
+	async function reloadVideos() {
+		const {
+			query,
+			currentPage,
+			videoSource,
+			statusFilter,
+			validationFilter,
+			createdFrom,
+			createdTo
+		} = $appStateStore;
+		await loadVideos(
+			query,
+			currentPage,
+			videoSource,
+			statusFilter,
+			validationFilter,
+			createdFrom,
+			createdTo
+		);
+	}
+
 	async function handlePageChange(pageNum: number) {
 		setCurrentPage(pageNum);
 		goto(`/${ToQuery($appStateStore)}`);
 	}
 
 	async function handleSearchParamsChange(searchParams: URLSearchParams) {
-		const { query, videoSource, pageNum, statusFilter, validationFilter } =
+		const { query, videoSource, pageNum, statusFilter, validationFilter, createdFrom, createdTo } =
 			getApiParams(searchParams);
-		setAll(query, pageNum, videoSource, statusFilter, validationFilter);
-		loadVideos(query, pageNum, videoSource, statusFilter, validationFilter);
+		setAll(query, pageNum, videoSource, statusFilter, validationFilter, createdFrom, createdTo);
+		loadVideos(query, pageNum, videoSource, statusFilter, validationFilter, createdFrom, createdTo);
 	}
 
 	async function handleResetVideo(id: number, forceReset: boolean) {
@@ -168,8 +202,7 @@
 				toast.success('重置成功', {
 					description: `视频「${data.video.name}」已重置`
 				});
-				const { query, currentPage, videoSource, statusFilter, validationFilter } = $appStateStore;
-				await loadVideos(query, currentPage, videoSource, statusFilter, validationFilter);
+				await reloadVideos();
 			} else {
 				toast.info('重置无效', {
 					description: `视频「${data.video.name}」没有失败的状态，无需重置`
@@ -196,8 +229,7 @@
 					description: `视频「${data.video.name}」已清空重置`
 				});
 			}
-			const { query, currentPage, videoSource, statusFilter, validationFilter } = $appStateStore;
-			await loadVideos(query, currentPage, videoSource, statusFilter, validationFilter);
+			await reloadVideos();
 		} catch (error) {
 			console.error('清空重置失败：', error);
 			toast.error('清空重置失败', {
@@ -246,8 +278,7 @@
 				toast.success('重置成功', {
 					description: `已重置 ${data.resetted_videos_count} 个视频和 ${data.resetted_pages_count} 个分页`
 				});
-				const { query, currentPage, videoSource, statusFilter, validationFilter } = $appStateStore;
-				await loadVideos(query, currentPage, videoSource, statusFilter, validationFilter);
+				await reloadVideos();
 			} else {
 				toast.info('没有需要重置的视频');
 			}
@@ -277,8 +308,7 @@
 				toast.success('更新成功', {
 					description: `已更新 ${data.updated_videos_count} 个视频和 ${data.updated_pages_count} 个分页`
 				});
-				const { query, currentPage, videoSource, statusFilter, validationFilter } = $appStateStore;
-				await loadVideos(query, currentPage, videoSource, statusFilter, validationFilter);
+				await reloadVideos();
 			} else {
 				toast.info('没有视频被更新');
 			}
@@ -343,6 +373,11 @@
 				normal: '有效'
 			};
 			parts.push(`有效性：${validationLabels[state.validationFilter]}`);
+		}
+		if (state.createdFrom || state.createdTo) {
+			const createdFrom = state.createdFrom?.replace('T', ' ') || '不限';
+			const createdTo = state.createdTo?.replace('T', ' ') || '不限';
+			parts.push(`创建时间：${createdFrom} 至 ${createdTo}`);
 		}
 		return parts;
 	}
@@ -429,6 +464,18 @@
 	></SearchBar>
 	<div class="flex items-center gap-3">
 		<div class="flex items-center gap-1">
+			<span class="text-muted-foreground text-xs">创建时间:</span>
+			<CreatedTimeFilter
+				createdFrom={$appStateStore.createdFrom}
+				createdTo={$appStateStore.createdTo}
+				onChange={(createdFrom, createdTo) => {
+					setCreatedTimeFilter(createdFrom, createdTo);
+					resetCurrentPage();
+					goto(`/${ToQuery($appStateStore)}`);
+				}}
+			/>
+		</div>
+		<div class="flex items-center gap-1">
 			<span class="text-muted-foreground text-xs">有效性:</span>
 			<ValidationFilter
 				value={$appStateStore.validationFilter}
@@ -468,11 +515,27 @@
 				{filters}
 				selectedLabel={$appStateStore.videoSource}
 				onSelect={(type, id) => {
-					setAll('', 0, { type, id }, $appStateStore.statusFilter, $appStateStore.validationFilter);
+					setAll(
+						'',
+						0,
+						{ type, id },
+						$appStateStore.statusFilter,
+						$appStateStore.validationFilter,
+						$appStateStore.createdFrom,
+						$appStateStore.createdTo
+					);
 					goto(`/${ToQuery($appStateStore)}`);
 				}}
 				onRemove={() => {
-					setAll('', 0, null, $appStateStore.statusFilter, $appStateStore.validationFilter);
+					setAll(
+						'',
+						0,
+						null,
+						$appStateStore.statusFilter,
+						$appStateStore.validationFilter,
+						$appStateStore.createdFrom,
+						$appStateStore.createdTo
+					);
 					goto(`/${ToQuery($appStateStore)}`);
 				}}
 			/>

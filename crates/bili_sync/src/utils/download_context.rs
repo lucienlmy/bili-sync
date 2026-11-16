@@ -1,7 +1,7 @@
 use sea_orm::DatabaseConnection;
 
 use crate::adapter::VideoSourceEnum;
-use crate::bilibili::BiliClient;
+use crate::bilibili::{BiliClient, FilterOption};
 use crate::config::Config;
 use crate::config::SkipOption;
 use crate::downloader::Downloader;
@@ -15,6 +15,7 @@ pub struct DownloadContext<'a> {
     pub downloader: &'a Downloader,
     pub config: &'a Config,
     pub skip_option: Option<SkipOption>,
+    pub filter_option: &'a FilterOption,
 }
 
 impl<'a> DownloadContext<'a> {
@@ -25,6 +26,7 @@ impl<'a> DownloadContext<'a> {
         connection: &'a DatabaseConnection,
         downloader: &'a Downloader,
         config: &'a Config,
+        filter_option: &'a FilterOption,
     ) -> Self {
         let skip_option = video_source
             .skip_option()
@@ -38,6 +40,7 @@ impl<'a> DownloadContext<'a> {
             downloader,
             config,
             skip_option,
+            filter_option,
         }
     }
 

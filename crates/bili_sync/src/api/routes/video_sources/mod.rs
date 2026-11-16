@@ -104,6 +104,7 @@ pub async fn get_video_sources_details(
                 collection::Column::Name,
                 collection::Column::Path,
                 collection::Column::Rule,
+                collection::Column::FilterOption,
                 collection::Column::Enabled,
                 collection::Column::LatestRowAt,
                 collection::Column::SkipOption
@@ -117,6 +118,7 @@ pub async fn get_video_sources_details(
                 favorite::Column::Name,
                 favorite::Column::Path,
                 favorite::Column::Rule,
+                favorite::Column::FilterOption,
                 favorite::Column::Enabled,
                 favorite::Column::LatestRowAt,
                 favorite::Column::SkipOption
@@ -131,6 +133,7 @@ pub async fn get_video_sources_details(
                 submission::Column::Path,
                 submission::Column::Enabled,
                 submission::Column::Rule,
+                submission::Column::FilterOption,
                 submission::Column::UseDynamicApi,
                 submission::Column::LatestRowAt,
                 submission::Column::SkipOption
@@ -146,7 +149,8 @@ pub async fn get_video_sources_details(
                 watch_later::Column::Enabled,
                 watch_later::Column::Rule,
                 watch_later::Column::LatestRowAt,
-                watch_later::Column::SkipOption
+                watch_later::Column::SkipOption,
+                watch_later::Column::FilterOption,
             ])
             .into_model::<VideoSourceDetail>()
             .all(&db)
@@ -157,6 +161,7 @@ pub async fn get_video_sources_details(
             name: "稍后再看".to_string(),
             path: String::new(),
             rule: None,
+            filter_option: None,
             rule_display: None,
             use_dynamic_api: None,
             enabled: false,
@@ -203,6 +208,7 @@ pub async fn update_video_source(
     ValidatedJson(request): ValidatedJson<UpdateVideoSourceRequest>,
 ) -> Result<ApiResponse<UpdateVideoSourceResponse>, ApiError> {
     let rule_display = request.rule.as_ref().map(|rule| rule.to_string());
+    let filter_option = request.filter_option.map(serde_json::to_value).transpose()?;
     let active_model = match source_type.as_str() {
         "collections" => collection::Entity::find_by_id(id).one(&db).await?.map(|model| {
             let mut active_model: collection::ActiveModel = model.into();
@@ -212,6 +218,7 @@ pub async fn update_video_source(
             if let Some(skip_option) = request.skip_option {
                 active_model.skip_option = Set(Some(skip_option));
             }
+            active_model.filter_option = Set(filter_option);
             _ActiveModel::Collection(active_model)
         }),
         "favorites" => favorite::Entity::find_by_id(id).one(&db).await?.map(|model| {
@@ -222,6 +229,7 @@ pub async fn update_video_source(
             if let Some(skip_option) = request.skip_option {
                 active_model.skip_option = Set(Some(skip_option));
             }
+            active_model.filter_option = Set(filter_option);
             _ActiveModel::Favorite(active_model)
         }),
         "submissions" => submission::Entity::find_by_id(id).one(&db).await?.map(|model| {
@@ -229,6 +237,7 @@ pub async fn update_video_source(
             active_model.path = Set(request.path);
             active_model.enabled = Set(request.enabled);
             active_model.rule = Set(request.rule);
+            active_model.filter_option = Set(filter_option);
             if let Some(use_dynamic_api) = request.use_dynamic_api {
                 active_model.use_dynamic_api = Set(use_dynamic_api);
             }
@@ -249,6 +258,7 @@ pub async fn update_video_source(
                 if let Some(skip_option) = request.skip_option {
                     active_model.skip_option = Set(Some(skip_option));
                 }
+                active_model.filter_option = Set(filter_option);
                 Some(_ActiveModel::WatchLater(active_model))
             }
             None => {
@@ -261,6 +271,7 @@ pub async fn update_video_source(
                         enabled: Set(request.enabled),
                         rule: Set(request.rule),
                         skip_option: Set(request.skip_option),
+                        filter_option: Set(filter_option),
                         ..Default::default()
                     }))
                 }

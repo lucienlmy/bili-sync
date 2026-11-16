@@ -5,11 +5,12 @@ use std::pin::Pin;
 use anyhow::{Context, Result, anyhow, bail};
 use bili_sync_entity::upper_vec::Upper;
 use bili_sync_entity::*;
-use futures::stream::FuturesUnordered;
+use futures::stream::{self, FuturesUnordered};
 use futures::{Stream, StreamExt, TryStreamExt};
 use sea_orm::ActiveValue::Set;
-use sea_orm::TransactionTrait;
 use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::{Alias, ExprTrait, Func};
+use sea_orm::{IntoSimpleExpr, TransactionTrait};
 use tokio::fs;
 use tokio::sync::Semaphore;
 use tokio::task;
@@ -17,7 +18,6 @@ use tokio::task;
 use std::os::unix::fs as unix_fs;
 #[cfg(windows)]
 use std::os::windows::fs as windows_fs;
-// removed unused imports
 
 use crate::adapter::{VideoSource, VideoSourceEnum};
 use crate::bilibili::{BestStream, BiliClient, BiliError, Dimension, PageInfo, Video, VideoInfo};
@@ -25,11 +25,12 @@ use crate::config::{ARGS, Config, PathSafeTemplate};
 use crate::downloader::Downloader;
 use crate::error::ExecutionStatus;
 use crate::notifier::DownloadNotifyInfo;
+use crate::utils::danmaku_schedule::should_sync_danmaku;
 use crate::utils::download_context::DownloadContext;
 use crate::utils::format_arg::{page_format_args, video_format_args};
 use crate::utils::model::{
-    create_pages, create_videos, filter_unfilled_videos, filter_unhandled_video_pages, update_pages_model,
-    update_videos_model,
+    create_pages, create_videos, filter_unfilled_videos, filter_unhandled_video_pages, set_video_models_invalid,
+    update_pages_model, update_video_detail_models, update_videos_model,
 };
 use crate::utils::nfo::{NFO, ToNFO};
 use crate::utils::notify::notify;
@@ -121,6 +122,15 @@ async fn create_equivalent(src: &Path, dst: &Path, prefer_link: bool, overwrite:
     Ok(())
 }
 
+const DANMAKU_STATUS_OFFSET: usize = 3;
+const VIDEO_PAGE_STATUS_OFFSET: usize = 4;
+
+#[allow(clippy::large_enum_variant)]
+enum VideoDetailUpdate {
+    Invalid(i32),
+    Detail(Vec<page::ActiveModel>, video::ActiveModel),
+}
+
 /// 完整地处理某个视频来源
 pub async fn process_video_source(
     video_source: VideoSourceEnum,
@@ -139,12 +149,21 @@ pub async fn process_video_source(
     refresh_video_source(&video_source, video_streams, connection).await?;
     // 单独请求视频详情接口，获取视频的详情信息与所有的分页，写入数据库
     fetch_video_details(bili_client, &video_source, connection, config).await?;
+    // 根据弹幕更新规则清空弹幕任务的标记位，允许后续任务覆盖
+    let danmaku_update_video_ids = prepare_danmaku_updates(&video_source, connection, config).await?;
     if ARGS.scan_only {
         warn!("已开启仅扫描模式，跳过视频下载..");
     } else {
         // 从数据库中查找所有未下载的视频与分页，下载并处理
-        let download_notify_info =
-            download_unprocessed_videos(bili_client, &video_source, connection, template, config).await?;
+        let download_notify_info = download_unprocessed_videos(
+            bili_client,
+            &video_source,
+            connection,
+            template,
+            config,
+            &danmaku_update_video_ids,
+        )
+        .await?;
         if download_notify_info.should_notify() {
             notify(config, bili_client, download_notify_info);
         }
@@ -190,7 +209,7 @@ pub async fn refresh_video_source<'a>(
             }
         })
         .filter_map(|(idx, res)| futures::future::ready(video_source.should_filter(idx, res, &latest_row_at)))
-        .chunks(10);
+        .chunks(30);
     let mut count = 0;
     while let Some(videos_info) = video_streams.next().await {
         count += videos_info.len();
@@ -217,12 +236,8 @@ pub async fn fetch_video_details(
 ) -> Result<()> {
     video_source.log_fetch_video_start();
     let videos_model = filter_unfilled_videos(video_source.filter_expr(), connection).await?;
-    let semaphore = Semaphore::new(config.concurrent_limit.video);
-    let semaphore_ref = &semaphore;
-    let tasks = videos_model
-        .into_iter()
+    let mut tasks = stream::iter(videos_model)
         .map(|video_model| async move {
-            let _permit = semaphore_ref.acquire().await.context("acquire semaphore failed")?;
             let video = Video::new(bili_client, video_model.bvid.as_str(), &config.credential);
             let info: Result<_> = async { Ok((video.get_tags().await?, video.get_view_info().await?)) }.await;
             match info {
@@ -231,10 +246,10 @@ pub async fn fetch_video_details(
                         "获取视频 {} - {} 的详细信息失败，错误为：{:#}",
                         &video_model.bvid, &video_model.name, e
                     );
-                    if let Some(BiliError::ErrorResponse(-404, _)) = e.downcast_ref::<BiliError>() {
-                        let mut video_active_model: bili_sync_entity::video::ActiveModel = video_model.into();
-                        video_active_model.valid = Set(false);
-                        video_active_model.save(connection).await?;
+                    if let Some(BiliError::ErrorResponse { code: -404, .. }) = e.downcast_ref::<BiliError>() {
+                        Some(VideoDetailUpdate::Invalid(video_model.id))
+                    } else {
+                        None
                     }
                 }
                 Ok((tags, mut view_info)) => {
@@ -253,16 +268,30 @@ pub async fn fetch_video_details(
                     video_active_model.single_page = Set(Some(pages.len() == 1));
                     video_active_model.tags = Set(Some(tags.into()));
                     video_active_model.should_download = Set(video_source.rule().evaluate(&video_active_model, &pages));
-                    let txn = connection.begin().await?;
-                    create_pages(pages, &txn).await?;
-                    video_active_model.save(&txn).await?;
-                    txn.commit().await?;
+                    Some(VideoDetailUpdate::Detail(pages, video_active_model))
                 }
-            };
-            Ok::<_, anyhow::Error>(())
+            }
         })
-        .collect::<FuturesUnordered<_>>();
-    tasks.try_collect::<()>().await?;
+        .buffer_unordered(config.concurrent_limit.video)
+        .filter_map(futures::future::ready)
+        .chunks(15);
+    while let Some(details) = tasks.next().await {
+        let mut invalid_video_ids = Vec::new();
+        let mut pages = Vec::new();
+        let mut videos = Vec::new();
+        details.into_iter().for_each(|detail| match detail {
+            VideoDetailUpdate::Invalid(video_id) => invalid_video_ids.push(video_id),
+            VideoDetailUpdate::Detail(video_pages, video) => {
+                pages.extend(video_pages);
+                videos.push(video);
+            }
+        });
+        let txn = connection.begin().await?;
+        update_video_detail_models(videos, &txn).await?;
+        set_video_models_invalid(invalid_video_ids, &txn).await?;
+        create_pages(pages, &txn).await?;
+        txn.commit().await?;
+    }
     video_source.log_fetch_video_end();
     Ok(())
 }
@@ -274,16 +303,29 @@ pub async fn download_unprocessed_videos(
     connection: &DatabaseConnection,
     template: &handlebars::Handlebars<'_>,
     config: &Config,
+    danmaku_update_video_ids: &HashSet<i32>,
 ) -> Result<DownloadNotifyInfo> {
     video_source.log_download_video_start();
-    let semaphore = Semaphore::new(config.concurrent_limit.video);
     let downloader = Downloader::new(bili_client.client.clone());
-    let cx = DownloadContext::new(bili_client, video_source, template, connection, &downloader, config);
+    let source_filter_option = video_source
+        .filter_option()
+        .as_ref()
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()?;
+    let filter_option = source_filter_option.as_ref().unwrap_or(&config.filter_option);
+    let cx = DownloadContext::new(
+        bili_client,
+        video_source,
+        template,
+        connection,
+        &downloader,
+        config,
+        filter_option,
+    );
     let unhandled_videos_pages = filter_unhandled_video_pages(video_source.filter_expr(), connection).await?;
     let mut assigned_upper_ids = HashSet::new();
-    let tasks = unhandled_videos_pages
-        .into_iter()
-        .map(|(video_model, pages_model)| {
+    let tasks = stream::iter(unhandled_videos_pages)
+        .map(|(mut video_model, pages_model)| {
             // 这里按理说是可以直接拿到 assigned_uppers 的，但rust 会错误地认为它引用了 local variable
             // 导致编译出错，暂时先这样单独提取出一个 owned 的 upper id 列表，再在任务内部筛选
             let task_uids = video_model
@@ -291,9 +333,21 @@ pub async fn download_unprocessed_videos(
                 .map(|u| u.mid)
                 .filter(|uid| assigned_upper_ids.insert(*uid))
                 .collect::<Vec<_>>();
-            download_video_pages(video_model, pages_model, &semaphore, task_uids, cx)
+            async move {
+                // b 站接口调整导致一段时间内的 tag 被错误保存为 []，迁移文件会将当前的 [] 更新为 None
+                // 此处在下载前发现 None 的 tag 尝试重新填充以修复错误
+                if video_model.tags.is_none() {
+                    video_model.tags = Some(
+                        Video::new(cx.bili_client, video_model.bvid.as_str(), &cx.config.credential)
+                            .get_tags()
+                            .await?
+                            .into(),
+                    );
+                }
+                download_video_pages(video_model, pages_model, task_uids, cx).await
+            }
         })
-        .collect::<FuturesUnordered<_>>();
+        .buffer_unordered(config.concurrent_limit.video);
     let mut risk_control_related_error = None;
     let mut stream = tasks
         // 触发风控时设置 download_aborted 标记并终止流
@@ -312,7 +366,7 @@ pub async fn download_unprocessed_videos(
         .chunks(10);
     let mut download_notify_info = DownloadNotifyInfo::new(video_source.display_name().into());
     while let Some(models) = stream.next().await {
-        download_notify_info.record(&models);
+        download_notify_info.record(&models, danmaku_update_video_ids);
         update_videos_model(models, connection).await?;
     }
     if let Some(e) = risk_control_related_error {
@@ -322,14 +376,106 @@ pub async fn download_unprocessed_videos(
     Ok(download_notify_info)
 }
 
+async fn prepare_danmaku_updates(
+    video_source: &VideoSourceEnum,
+    connection: &DatabaseConnection,
+    config: &Config,
+) -> Result<HashSet<i32>> {
+    if !config.danmaku_update_policy.enabled
+        || config.danmaku_update_policy.milestones.is_empty()
+        || config.skip_option.no_danmaku
+    {
+        return Ok(HashSet::new());
+    }
+    let now = chrono::Utc::now();
+    // safety: milestones are checked to be non-empty
+    let (first_milestone, last_milestone) = (
+        config.danmaku_update_policy.milestones.first().unwrap(),
+        config.danmaku_update_policy.milestones.last().unwrap(),
+    );
+    let (start_hours, end_days) = (first_milestone.start_hours(), last_milestone.end_days());
+    let (milestone_newest_pubtime, milestone_oldest_pubtime) = (
+        now - chrono::Duration::hours(start_hours),
+        now - chrono::Duration::days(end_days),
+    );
+    let within_schedule = video::Column::Pubtime.gte(milestone_oldest_pubtime.naive_utc());
+    let final_sync_pending = page::Column::DanmakuLastSyncedAt
+        .is_null()
+        .or(page::Column::DanmakuLastSyncedAt
+            .into_simple_expr()
+            .lt(Func::cust(Alias::new("datetime"))
+                .arg(video::Column::Pubtime.into_simple_expr())
+                .arg(format!("+{} days", end_days))));
+    let candidates = video::Entity::find()
+        .filter(
+            video::Column::Valid
+                .eq(true)
+                .and(video::Column::Category.eq(2))
+                .and(video::Column::SinglePage.is_not_null())
+                .and(video::Column::ShouldDownload.eq(true))
+                .and(video::Column::Pubtime.lte(milestone_newest_pubtime.naive_utc()))
+                .and(video_source.filter_expr()),
+        )
+        .find_with_related(page::Entity)
+        .filter(PageStatus::query_builder().subtask_succeeded(DANMAKU_STATUS_OFFSET))
+        .filter(within_schedule.or(final_sync_pending))
+        .all(connection)
+        .await?;
+    let mut due_page_ids = Vec::new();
+    let mut due_video_ids = Vec::new();
+    for (video_model, pages) in candidates {
+        let page_count_before = due_page_ids.len();
+        for page_model in pages {
+            if should_sync_danmaku(
+                &config.danmaku_update_policy.milestones,
+                video_model.pubtime.and_utc(),
+                page_model.danmaku_last_synced_at.map(|time| time.and_utc()),
+                now,
+            ) {
+                due_page_ids.push(page_model.id);
+            }
+        }
+        if due_page_ids.len() > page_count_before {
+            due_video_ids.push(video_model.id);
+        }
+    }
+    if due_page_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let (reset_video_count, reset_page_count) = (due_video_ids.len(), due_page_ids.len());
+    let txn = connection.begin().await?;
+    page::Entity::update_many()
+        .col_expr(
+            page::Column::DownloadStatus,
+            PageStatus::query_builder().reset_subtask(DANMAKU_STATUS_OFFSET),
+        )
+        .filter(page::Column::Id.is_in(due_page_ids))
+        .exec(&txn)
+        .await?;
+    video::Entity::update_many()
+        .col_expr(
+            video::Column::DownloadStatus,
+            VideoStatus::query_builder().reset_subtask(VIDEO_PAGE_STATUS_OFFSET),
+        )
+        .filter(video::Column::Id.is_in(due_video_ids.iter().copied()))
+        .exec(&txn)
+        .await?;
+    txn.commit().await?;
+    if reset_video_count > 0 && reset_page_count > 0 {
+        info!(
+            "已将 {} 个视频中的 {} 分页加入本次弹幕更新",
+            reset_video_count, reset_page_count
+        );
+    }
+    Ok(due_video_ids.into_iter().collect())
+}
+
 pub async fn download_video_pages(
     video_model: video::Model,
     page_models: Vec<page::Model>,
-    semaphore: &Semaphore,
     upper_uids: Vec<i64>,
     cx: DownloadContext<'_>,
 ) -> Result<video::ActiveModel> {
-    let _permit = semaphore.acquire().await.context("acquire semaphore failed")?;
     let mut status = VideoStatus::from(video_model.download_status);
     let separate_status = status.should_run();
     // 未记录路径时填充，已经填充过路径时使用现有的
@@ -425,6 +571,7 @@ pub async fn download_video_pages(
         }
     }
     let mut video_active_model: video::ActiveModel = video_model.into();
+    video_active_model.tags.reset();
     video_active_model.download_status = Set(status.into());
     video_active_model.path = Set(base_path.to_string_lossy().to_string());
     Ok(video_active_model)
@@ -441,11 +588,9 @@ pub async fn dispatch_download_page(
     if !should_run {
         return Ok(ExecutionStatus::Skipped);
     }
-    let child_semaphore = Semaphore::new(cx.config.concurrent_limit.page);
-    let tasks = page_models
-        .into_iter()
-        .map(|page_model| download_page(video_model, page_model, &child_semaphore, base_path, cx))
-        .collect::<FuturesUnordered<_>>();
+    let tasks = stream::iter(page_models)
+        .map(|page_model| download_page(video_model, page_model, base_path, cx))
+        .buffer_unordered(cx.config.concurrent_limit.page);
     let (mut risk_control_related_error, mut target_status) = (None, STATUS_OK);
     let mut stream = tasks
         .take_while(|res| {
@@ -488,11 +633,9 @@ pub async fn dispatch_download_page(
 pub async fn download_page(
     video_model: &video::Model,
     page_model: page::Model,
-    semaphore: &Semaphore,
     base_path: &Path,
     cx: DownloadContext<'_>,
 ) -> Result<page::ActiveModel> {
-    let _permit = semaphore.acquire().await.context("acquire semaphore failed")?;
     let mut status = PageStatus::from(page_model.download_status);
     let separate_status = status.should_run();
     let is_single_page = video_model.single_page.context("single_page is null")?;
@@ -537,32 +680,32 @@ pub async fn download_page(
     let base_path = dunce::canonicalize(base_path).context("canonicalize base path failed")?;
     let (poster_path, video_path, nfo_path, danmaku_path, fanart_path, subtitle_path) = if is_single_page {
         (
-            base_path.join(format!("{}-poster.jpg", &base_name)),
-            base_path.join(format!("{}.mp4", &base_name)),
-            base_path.join(format!("{}.nfo", &base_name)),
-            base_path.join(format!("{}.zh-CN.default.ass", &base_name)),
-            Some(base_path.join(format!("{}-fanart.jpg", &base_name))),
-            base_path.join(format!("{}.srt", &base_name)),
+            base_path.join(format!("{}-poster.jpg", base_name)),
+            base_path.join(format!("{}.mp4", base_name)),
+            base_path.join(format!("{}.nfo", base_name)),
+            base_path.join(format!("{}.zh-CN.default.ass", base_name)),
+            Some(base_path.join(format!("{}-fanart.jpg", base_name))),
+            base_path.join(format!("{}.srt", base_name)),
         )
     } else {
         (
             base_path
                 .join("Season 1")
-                .join(format!("{} - S01E{:0>2}-thumb.jpg", &base_name, page_model.pid)),
+                .join(format!("{} - S01E{:0>2}-thumb.jpg", base_name, page_model.pid)),
             base_path
                 .join("Season 1")
-                .join(format!("{} - S01E{:0>2}.mp4", &base_name, page_model.pid)),
+                .join(format!("{} - S01E{:0>2}.mp4", base_name, page_model.pid)),
             base_path
                 .join("Season 1")
-                .join(format!("{} - S01E{:0>2}.nfo", &base_name, page_model.pid)),
+                .join(format!("{} - S01E{:0>2}.nfo", base_name, page_model.pid)),
             base_path
                 .join("Season 1")
-                .join(format!("{} - S01E{:0>2}.zh-CN.default.ass", &base_name, page_model.pid)),
+                .join(format!("{} - S01E{:0>2}.zh-CN.default.ass", base_name, page_model.pid)),
             // 对于多页视频，会在上一步 fetch_video_poster 中获取剧集的 fanart，无需在此处下载单集的
             None,
             base_path
                 .join("Season 1")
-                .join(format!("{} - S01E{:0>2}.srt", &base_name, page_model.pid)),
+                .join(format!("{} - S01E{:0>2}.srt", base_name, page_model.pid)),
         )
     };
     let dimension = match (page_model.width, page_model.height) {
@@ -624,6 +767,7 @@ pub async fn download_page(
     );
     let results = [res_1.into(), res_2.into(), res_3.into(), res_4.into(), res_5.into()];
     status.update_status(&results);
+    let danmaku_succeeded = matches!(&results[DANMAKU_STATUS_OFFSET], ExecutionStatus::Succeeded);
     results
         .iter()
         .zip(["封面", "视频", "详情", "弹幕", "字幕"])
@@ -659,6 +803,9 @@ pub async fn download_page(
     let mut page_active_model: page::ActiveModel = page_model.into();
     page_active_model.download_status = Set(status.into());
     page_active_model.path = Set(Some(video_path.to_string_lossy().to_string()));
+    if danmaku_succeeded {
+        page_active_model.danmaku_last_synced_at = Set(Some(chrono::Utc::now().naive_utc()));
+    }
     Ok(page_active_model)
 }
 
@@ -722,7 +869,7 @@ pub async fn fetch_page_video(
     let streams = bili_video
         .get_page_analyzer(page_info)
         .await?
-        .best_stream(&cx.config.filter_option)?;
+        .best_stream(cx.filter_option)?;
     match streams {
         BestStream::Mixed(mix_stream) => {
             cx.downloader

@@ -86,6 +86,10 @@ impl VideoSource for submission::Model {
         &self.skip_option
     }
 
+    fn filter_option(&self) -> &Option<Json> {
+        &self.filter_option
+    }
+
     async fn refresh<'a>(
         self,
         bili_client: &'a BiliClient,

@@ -9,33 +9,39 @@
 	import * as Table from '$lib/components/ui/table/index.js';
 	import * as Tabs from '$lib/components/ui/tabs/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
-	import {
-		SquarePenIcon,
-		FolderIcon,
-		HeartIcon,
-		UserIcon,
-		ClockIcon,
-		PlusIcon,
-		InfoIcon,
-		Trash2Icon,
-		CircleCheckBigIcon,
-		CircleXIcon,
-		RefreshCwIcon
-	} from '@lucide/svelte/icons';
+	import CircleCheckBigIcon from '@lucide/svelte/icons/circle-check-big';
+	import CircleXIcon from '@lucide/svelte/icons/circle-x';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import FolderIcon from '@lucide/svelte/icons/folder';
+	import HeartIcon from '@lucide/svelte/icons/heart';
+	import InfoIcon from '@lucide/svelte/icons/info';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import UserIcon from '@lucide/svelte/icons/user';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { toast } from 'svelte-sonner';
 	import { setBreadcrumb } from '$lib/stores/breadcrumb';
-	import type { ApiError, VideoSourceDetail, VideoSourcesDetailsResponse, Rule } from '$lib/types';
+	import type {
+		ApiError,
+		FilterOption,
+		VideoSourceDetail,
+		VideoSourcesDetailsResponse,
+		Rule
+	} from '$lib/types';
 	import api from '$lib/api';
 	import RuleEditor from '$lib/components/rule-editor.svelte';
 	import ListRestartIcon from '@lucide/svelte/icons/list-restart';
-import ShieldIcon from '@lucide/svelte/icons/shield';
-import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
+	import ShieldIcon from '@lucide/svelte/icons/shield';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
+	import FilterOptionEditor from '$lib/components/filter-option-editor.svelte';
 
 	let videoSourcesData: VideoSourcesDetailsResponse | null = null;
 	let loading = false;
 	let activeTab = 'favorites';
 	let togglingIds = new Set<number>(); // 记录正在切换的 source id
+	let globalFilterOption: FilterOption | null = null;
 
 	// 添加对话框状态
 	let showAddDialog = false;
@@ -48,6 +54,8 @@ import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 	let editingType = '';
 	let editingIdx: number = 0;
 	let saving = false;
+	let useCustomFilterOption = false;
+	let editFilterOption: FilterOption | null = null;
 
 	// 规则评估对话框状态
 	let showEvaluateDialog = false;
@@ -110,8 +118,12 @@ import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 	async function loadVideoSources() {
 		loading = true;
 		try {
-			const response = await api.getVideoSourcesDetails();
+			const [response, configResponse] = await Promise.all([
+				api.getVideoSourcesDetails(),
+				api.getConfig()
+			]);
 			videoSourcesData = response.data;
+			globalFilterOption = configResponse.data.filter_option;
 		} catch (error) {
 			toast.error('加载视频源失败', {
 				description: (error as ApiError).message
@@ -132,6 +144,8 @@ import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 			useDynamicApi: source.useDynamicApi,
 			rule: source.rule
 		};
+		useCustomFilterOption = source.filterOption !== null;
+		editFilterOption = structuredClone(source.filterOption ?? globalFilterOption!);
 		showEditDialog = true;
 	}
 
@@ -280,7 +294,8 @@ import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 				path: editForm.path,
 				enabled: editForm.enabled,
 				rule: editForm.rule,
-				useDynamicApi: editForm.useDynamicApi
+				useDynamicApi: editForm.useDynamicApi,
+				filterOption: useCustomFilterOption ? editFilterOption : null
 			});
 			// 更新本地数据
 			if (videoSourcesData && editingSource) {
@@ -293,6 +308,7 @@ import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 					enabled: editForm.enabled,
 					rule: editForm.rule,
 					useDynamicApi: editForm.useDynamicApi,
+					filterOption: useCustomFilterOption ? structuredClone(editFilterOption) : null,
 					ruleDisplay: response.data.ruleDisplay
 				};
 				videoSourcesData = { ...videoSourcesData };
@@ -755,6 +771,18 @@ import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 				<!-- 规则编辑器 -->
 				<div>
 					<RuleEditor rule={editForm.rule} onRuleChange={(rule) => (editForm.rule = rule)} />
+				</div>
+
+				<div class="space-y-4">
+					<div class="flex items-center space-x-2">
+						<Switch bind:checked={useCustomFilterOption} />
+						<Label class="text-sm font-medium">覆盖全局流设置</Label>
+					</div>
+					{#if editFilterOption}
+						<div class="border-muted ml-3 border-l-2 pl-6">
+							<FilterOptionEditor bind:value={editFilterOption} disabled={!useCustomFilterOption} />
+						</div>
+					{/if}
 				</div>
 			</div>
 			<div class="mt-8 flex justify-end gap-3">

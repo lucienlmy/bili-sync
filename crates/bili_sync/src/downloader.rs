@@ -5,15 +5,13 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail, ensure};
 use async_tempfile::TempFile;
-use futures::TryStreamExt;
 use futures::StreamExt;
 use reqwest::{Method, StatusCode, header};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::fs::{self};
-use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt, BufWriter};
 use tokio::process::Command;
 use tokio::task::JoinSet;
-use tokio_util::io::StreamReader;
 
 use crate::bilibili::{Client, ErrorForStatusExt};
 use crate::config::{ARGS, ConcurrentDownloadLimit};
@@ -170,37 +168,32 @@ impl Downloader {
         let expected = resp.header_content_length();
         let mut stream = resp.bytes_stream();
         let mut received: u64 = 0;
-        // progress tracking
-        let total = expected;
-        let downloaded = Arc::new(AtomicU64::new(0));
-        let last_percent = Arc::new(AtomicU64::new(0));
-        // 0: none, 1: start logged, 2: 50% logged, 3: finished logged
+        // 进度日志：沿用 BufWriter 缓冲，同时手动统计字节数以支持进度上报
+        let mut file_writer = BufWriter::with_capacity(2 * 1024 * 1024, file);
         let last_phase = Arc::new(AtomicU64::new(0));
-        // friendly id: prefer target file name, fallback to temp file name
+        // 0: none, 1: start logged, 2: 50% logged, 3: finished logged
         let id_display = target
             .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
-            .or_else(|| file.file_path().file_name().map(|s| s.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| file.file_path().to_string_lossy().into_owned());
-        // file type: prefer explicit kind, fallback to target/temp extension
+            .or_else(|| file_writer.get_ref().file_path().file_name().map(|s| s.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| file_writer.get_ref().file_path().to_string_lossy().into_owned());
         let file_type = kind
             .map(|s| s.to_string())
             .or_else(|| {
                 target
                     .and_then(|p| p.extension().map(|s| s.to_string_lossy().into_owned()))
-                    .or_else(|| file.file_path().extension().map(|s| s.to_string_lossy().into_owned()))
+                    .or_else(|| file_writer.get_ref().file_path().extension().map(|s| s.to_string_lossy().into_owned()))
             })
             .map(|s| s.to_uppercase())
             .unwrap_or_else(|| "UNKNOWN".to_string());
-        // full path, but simplify LOCALAPPDATA on Windows to keep logs concise
         let mut full_path_display = target
             .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| file.file_path().to_string_lossy().into_owned());
+            .unwrap_or_else(|| file_writer.get_ref().file_path().to_string_lossy().into_owned());
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
             if full_path_display.starts_with(&local) {
                 full_path_display = full_path_display.replacen(&local, "<winLocalAppData>", 1);
             }
         }
-        if let Some(total_size) = total {
+        if let Some(total_size) = expected {
             if last_phase.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
                 info!("【文件层进度】file=\"{}\" done=0/{} (0%) path=\"{}\"", id_display, total_size, full_path_display);
             }
@@ -208,29 +201,22 @@ impl Downloader {
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(std::io::Error::other)?;
-            file.write_all(&chunk).await?;
+            file_writer.write_all(&chunk).await?;
             received += chunk.len() as u64;
-            downloaded.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-            if let Some(total_size) = total {
-                let percent = downloaded.load(Ordering::Relaxed) * 100 / total_size;
-                let old = last_percent.load(Ordering::Relaxed);
-                if percent > old {
-                    if last_percent.compare_exchange(old, percent, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                        // Only log three times: start(0%), 50% (first time >=50), finish(100%)
-                        if percent == 100 {
-                            if last_phase.compare_exchange(0, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase.compare_exchange(1, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase.compare_exchange(2, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                                info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, downloaded.load(Ordering::Relaxed), total_size, percent, full_path_display);
-                            }
-                        } else if percent >= 50 {
-                            if last_phase.compare_exchange(1, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase.compare_exchange(0, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                                info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, downloaded.load(Ordering::Relaxed), total_size, percent, full_path_display);
-                            }
-                        }
+            if let Some(total_size) = expected {
+                let percent = received * 100 / total_size;
+                if percent == 100 {
+                    if last_phase.compare_exchange(0, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase.compare_exchange(1, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase.compare_exchange(2, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                        info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, received, total_size, percent, full_path_display);
+                    }
+                } else if percent >= 50 {
+                    if last_phase.compare_exchange(1, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase.compare_exchange(0, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                        info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, received, total_size, percent, full_path_display);
                     }
                 }
             }
         }
-        file.flush().await?;
+        file_writer.flush().await?;
         if let Some(expected) = expected {
             ensure!(
                 received == expected,
@@ -332,13 +318,13 @@ impl Downloader {
                 }
                 let mut stream = resp.bytes_stream();
                 let mut part_received: u64 = 0;
-                // friendly id for logs: prefer target when available
+                // 进度日志：沿用 BufWriter 缓冲，同时手动统计字节数以支持全局进度上报
+                let mut file_writer = BufWriter::with_capacity(2 * 1024 * 1024, file_clone);
                 let id_display = target_cl
                     .as_ref()
                     .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
                     .or_else(|| file_path_buf.file_name().map(|s| s.to_string_lossy().into_owned()))
                     .unwrap_or_else(|| file_path_buf.to_string_lossy().into_owned());
-                // file type: prefer explicit kind, fallback to target/temp extension
                 let file_type = kind_cl
                     .as_deref()
                     .map(|s| s.to_string())
@@ -350,7 +336,6 @@ impl Downloader {
                     })
                     .map(|s| s.to_uppercase())
                     .unwrap_or_else(|| "UNKNOWN".to_string());
-                // full path, simplify LOCALAPPDATA on Windows
                 let mut full_path_display = target_cl
                     .as_ref()
                     .map(|p| p.to_string_lossy().into_owned())
@@ -362,26 +347,21 @@ impl Downloader {
                 }
                 while let Some(chunk) = stream.next().await {
                     let chunk = chunk.map_err(std::io::Error::other)?;
-                    file_clone.write_all(&chunk).await?;
+                    file_writer.write_all(&chunk).await?;
                     part_received += chunk.len() as u64;
-                    // update global counter and maybe log progress
                     downloaded_cl.fetch_add(chunk.len() as u64, Ordering::Relaxed);
                     let percent = downloaded_cl.load(Ordering::Relaxed) * 100 / file_size;
-                    let old = last_percent_cl.load(Ordering::Relaxed);
-                    if percent > old && last_percent_cl.compare_exchange(old, percent, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                        // Only log three times: start(0%), 50% (first time >=50), finish(100%)
-                        if percent == 100 {
-                            if last_phase_cl.compare_exchange(0, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase_cl.compare_exchange(1, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase_cl.compare_exchange(2, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                                info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, downloaded_cl.load(Ordering::Relaxed), file_size, percent, full_path_display);
-                            }
-                        } else if percent >= 50 {
-                            if last_phase_cl.compare_exchange(1, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase_cl.compare_exchange(0, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                                info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, downloaded_cl.load(Ordering::Relaxed), file_size, percent, full_path_display);
-                            }
+                    if percent == 100 {
+                        if last_phase_cl.compare_exchange(0, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase_cl.compare_exchange(1, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase_cl.compare_exchange(2, 3, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                            info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, downloaded_cl.load(Ordering::Relaxed), file_size, percent, full_path_display);
+                        }
+                    } else if percent >= 50 {
+                        if last_phase_cl.compare_exchange(1, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() || last_phase_cl.compare_exchange(0, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                            info!("【文件层进度】type=\"{}\" file=\"{}\" done={}/{} ({}%) path=\"{}\"", file_type, id_display, downloaded_cl.load(Ordering::Relaxed), file_size, percent, full_path_display);
                         }
                     }
                 }
-                file_clone.flush().await?;
+                file_writer.flush().await?;
                 ensure!(
                     part_received == end - start + 1,
                     "downloaded bytes mismatch: expected {}, got {}",
