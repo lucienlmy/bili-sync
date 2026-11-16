@@ -222,6 +222,8 @@ pub struct VideoSourceDetail {
     pub use_dynamic_api: Option<bool>,
     pub enabled: bool,
     pub latest_row_at: Option<DateTime>,
+    #[serde(default)]
+    pub skip_option: Option<String>,
 }
 
 #[derive(Serialize)]

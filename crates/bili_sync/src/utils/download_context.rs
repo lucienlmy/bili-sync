@@ -3,9 +3,10 @@ use sea_orm::DatabaseConnection;
 use crate::adapter::VideoSourceEnum;
 use crate::bilibili::BiliClient;
 use crate::config::Config;
+use crate::config::SkipOption;
 use crate::downloader::Downloader;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct DownloadContext<'a> {
     pub bili_client: &'a BiliClient,
     pub video_source: &'a VideoSourceEnum,
@@ -13,6 +14,7 @@ pub struct DownloadContext<'a> {
     pub connection: &'a DatabaseConnection,
     pub downloader: &'a Downloader,
     pub config: &'a Config,
+    pub skip_option: Option<SkipOption>,
 }
 
 impl<'a> DownloadContext<'a> {
@@ -24,6 +26,10 @@ impl<'a> DownloadContext<'a> {
         downloader: &'a Downloader,
         config: &'a Config,
     ) -> Self {
+        let skip_option = video_source
+            .skip_option()
+            .and_then(|s| serde_json::from_str(s).ok());
+
         Self {
             bili_client,
             video_source,
@@ -31,6 +37,11 @@ impl<'a> DownloadContext<'a> {
             connection,
             downloader,
             config,
+            skip_option,
         }
+    }
+
+    pub fn get_skip_option(&self) -> &SkipOption {
+        self.skip_option.as_ref().unwrap_or(&self.config.skip_option)
     }
 }

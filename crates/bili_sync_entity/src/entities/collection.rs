@@ -18,6 +18,7 @@ pub struct Model {
     pub latest_row_at: DateTime,
     pub rule: Option<Rule>,
     pub enabled: bool,
+    pub skip_option: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -227,6 +227,7 @@ export interface VideoSourceDetail {
 	useDynamicApi: boolean | null;
 	enabled: boolean;
 	latestRowAt: string | null;
+	skipOption?: string | null;
 }
 
 export interface VideoSourcesDetailsResponse {
@@ -241,6 +242,7 @@ export interface UpdateVideoSourceRequest {
 	enabled: boolean;
 	rule?: Rule | null;
 	useDynamicApi?: boolean | null;
+	skipOption?: string | null;
 }
 
 export interface Credential {

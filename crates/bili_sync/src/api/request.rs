@@ -139,6 +139,7 @@ pub struct UpdateVideoSourceRequest {
     pub enabled: bool,
     pub rule: Option<Rule>,
     pub use_dynamic_api: Option<bool>,
+    pub skip_option: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

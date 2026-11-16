@@ -105,7 +105,8 @@ pub async fn get_video_sources_details(
                 collection::Column::Path,
                 collection::Column::Rule,
                 collection::Column::Enabled,
-                collection::Column::LatestRowAt
+                collection::Column::LatestRowAt,
+                collection::Column::SkipOption
             ])
             .into_model::<VideoSourceDetail>()
             .all(&db),
@@ -117,7 +118,8 @@ pub async fn get_video_sources_details(
                 favorite::Column::Path,
                 favorite::Column::Rule,
                 favorite::Column::Enabled,
-                favorite::Column::LatestRowAt
+                favorite::Column::LatestRowAt,
+                favorite::Column::SkipOption
             ])
             .into_model::<VideoSourceDetail>()
             .all(&db),
@@ -130,7 +132,8 @@ pub async fn get_video_sources_details(
                 submission::Column::Enabled,
                 submission::Column::Rule,
                 submission::Column::UseDynamicApi,
-                submission::Column::LatestRowAt
+                submission::Column::LatestRowAt,
+                submission::Column::SkipOption
             ])
             .into_model::<VideoSourceDetail>()
             .all(&db),
@@ -142,7 +145,8 @@ pub async fn get_video_sources_details(
                 watch_later::Column::Path,
                 watch_later::Column::Enabled,
                 watch_later::Column::Rule,
-                watch_later::Column::LatestRowAt
+                watch_later::Column::LatestRowAt,
+                watch_later::Column::SkipOption
             ])
             .into_model::<VideoSourceDetail>()
             .all(&db)
@@ -157,6 +161,7 @@ pub async fn get_video_sources_details(
             use_dynamic_api: None,
             enabled: false,
             latest_row_at: None,
+            skip_option: None,
         })
     }
     for sources in [&mut collections, &mut favorites, &mut submissions, &mut watch_later] {
@@ -204,6 +209,9 @@ pub async fn update_video_source(
             active_model.path = Set(request.path);
             active_model.enabled = Set(request.enabled);
             active_model.rule = Set(request.rule);
+            if let Some(skip_option) = request.skip_option {
+                active_model.skip_option = Set(Some(skip_option));
+            }
             _ActiveModel::Collection(active_model)
         }),
         "favorites" => favorite::Entity::find_by_id(id).one(&db).await?.map(|model| {
@@ -211,6 +219,9 @@ pub async fn update_video_source(
             active_model.path = Set(request.path);
             active_model.enabled = Set(request.enabled);
             active_model.rule = Set(request.rule);
+            if let Some(skip_option) = request.skip_option {
+                active_model.skip_option = Set(Some(skip_option));
+            }
             _ActiveModel::Favorite(active_model)
         }),
         "submissions" => submission::Entity::find_by_id(id).one(&db).await?.map(|model| {
@@ -220,6 +231,9 @@ pub async fn update_video_source(
             active_model.rule = Set(request.rule);
             if let Some(use_dynamic_api) = request.use_dynamic_api {
                 active_model.use_dynamic_api = Set(use_dynamic_api);
+            }
+            if let Some(skip_option) = request.skip_option {
+                active_model.skip_option = Set(Some(skip_option));
             }
             _ActiveModel::Submission(active_model)
         }),
@@ -232,6 +246,9 @@ pub async fn update_video_source(
                 active_model.path = Set(request.path);
                 active_model.enabled = Set(request.enabled);
                 active_model.rule = Set(request.rule);
+                if let Some(skip_option) = request.skip_option {
+                    active_model.skip_option = Set(Some(skip_option));
+                }
                 Some(_ActiveModel::WatchLater(active_model))
             }
             None => {
@@ -243,6 +260,7 @@ pub async fn update_video_source(
                         path: Set(request.path),
                         enabled: Set(request.enabled),
                         rule: Set(request.rule),
+                        skip_option: Set(request.skip_option),
                         ..Default::default()
                     }))
                 }

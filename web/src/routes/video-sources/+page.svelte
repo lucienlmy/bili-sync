@@ -29,7 +29,8 @@
 	import api from '$lib/api';
 	import RuleEditor from '$lib/components/rule-editor.svelte';
 	import ListRestartIcon from '@lucide/svelte/icons/list-restart';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
+import ShieldIcon from '@lucide/svelte/icons/shield';
+import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 
 	let videoSourcesData: VideoSourcesDetailsResponse | null = null;
 	let loading = false;
@@ -67,6 +68,23 @@
 	let fullSyncType = '';
 	let fullSyncDeleteLocal = false;
 	let fullSyncing = false;
+
+	// 覆盖策略对话框状态
+	let showOverwriteDialog = false;
+	let overwriteSource: VideoSourceDetail | null = null;
+	let overwriteType = '';
+	let overwriteSaving = false;
+
+	// 覆盖策略表单数据
+	let overwriteForm = {
+		no_overwrite: false,
+		no_overwrite_video: false,
+		no_overwrite_poster: false,
+		no_overwrite_video_nfo: false,
+		no_overwrite_upper: false,
+		no_overwrite_danmaku: false,
+		no_overwrite_subtitle: false
+	};
 
 	// 编辑表单数据
 	let editForm = {
@@ -135,6 +153,86 @@
 		fullSyncType = type;
 		fullSyncDeleteLocal = false;
 		showFullSyncDialog = true;
+	}
+
+	function openOverwriteDialog(type: string, source: VideoSourceDetail) {
+		overwriteSource = source;
+		overwriteType = type;
+		// 初始化表单数据（从视频源的 skip_option 字段读取，如果有的话）
+		if (source.skipOption) {
+			try {
+				const skipOption = JSON.parse(source.skipOption);
+				overwriteForm = {
+					no_overwrite: skipOption.no_overwrite || false,
+					no_overwrite_video: skipOption.no_overwrite_video || false,
+					no_overwrite_poster: skipOption.no_overwrite_poster || false,
+					no_overwrite_video_nfo: skipOption.no_overwrite_video_nfo || false,
+					no_overwrite_upper: skipOption.no_overwrite_upper || false,
+					no_overwrite_danmaku: skipOption.no_overwrite_danmaku || false,
+					no_overwrite_subtitle: skipOption.no_overwrite_subtitle || false
+				};
+			} catch (e) {
+				// 如果解析失败，使用默认值
+				overwriteForm = {
+					no_overwrite: false,
+					no_overwrite_video: false,
+					no_overwrite_poster: false,
+					no_overwrite_video_nfo: false,
+					no_overwrite_upper: false,
+					no_overwrite_danmaku: false,
+					no_overwrite_subtitle: false
+				};
+			}
+		} else {
+			overwriteForm = {
+				no_overwrite: false,
+				no_overwrite_video: false,
+				no_overwrite_poster: false,
+				no_overwrite_video_nfo: false,
+				no_overwrite_upper: false,
+				no_overwrite_danmaku: false,
+				no_overwrite_subtitle: false
+			};
+		}
+		showOverwriteDialog = true;
+	}
+
+	async function saveOverwriteSettings() {
+		if (!overwriteSource) return;
+		overwriteSaving = true;
+		try {
+			// 调用 API 更新视频源，保存覆盖策略设置
+			const skipOption = JSON.stringify(overwriteForm);
+			await api.updateVideoSource(overwriteType, overwriteSource.id, {
+				path: overwriteSource.path,
+				enabled: overwriteSource.enabled,
+				rule: overwriteSource.rule,
+				useDynamicApi: overwriteSource.useDynamicApi,
+				skipOption
+			});
+			// 更新本地数据
+			if (videoSourcesData && overwriteSource) {
+				const sources = videoSourcesData[
+					overwriteType as keyof VideoSourcesDetailsResponse
+				] as VideoSourceDetail[];
+				const index = sources.findIndex((s) => s.id === overwriteSource.id);
+				if (index !== -1) {
+					sources[index] = {
+						...sources[index],
+						skipOption
+					};
+					videoSourcesData = { ...videoSourcesData };
+				}
+			}
+			toast.success('覆盖策略设置已保存');
+			showOverwriteDialog = false;
+		} catch (error) {
+			toast.error('保存失败', {
+				description: (error as ApiError).message
+			});
+		} finally {
+			overwriteSaving = false;
+		}
 	}
 
 	async function fullSyncVideoSource() {
@@ -534,6 +632,21 @@
 														<p class="text-xs">全量更新视频</p>
 													</Tooltip.Content>
 												</Tooltip.Root>
+												<Tooltip.Root disableHoverableContent={true}>
+													<Tooltip.Trigger>
+														<Button
+															size="sm"
+															variant="outline"
+															onclick={() => openOverwriteDialog(key, source)}
+															class="h-8 w-8 p-0"
+														>
+															<ShieldIcon class="h-3 w-3" />
+														</Button>
+													</Tooltip.Trigger>
+													<Tooltip.Content>
+														<p class="text-xs">覆盖策略</p>
+													</Tooltip.Content>
+												</Tooltip.Root>
 												{#if activeTab !== 'watch_later'}
 													<Tooltip.Root disableHoverableContent={true}>
 														<Tooltip.Trigger>
@@ -746,6 +859,71 @@
 			</AlertDialog.Footer>
 		</AlertDialog.Content>
 	</AlertDialog.Root>
+
+	<!-- 覆盖策略对话框 -->
+	<Dialog.Root bind:open={showOverwriteDialog}>
+		<Dialog.Content class="no-scrollbar max-h-[85vh] overflow-y-auto">
+			<Dialog.Title class="text-lg font-semibold">
+				设置覆盖策略: {overwriteSource?.name || ''}
+			</Dialog.Title>
+			<div class="mt-6 space-y-4">
+				<div class="flex items-center space-x-2">
+					<Switch id="overwrite-no-overwrite" bind:checked={overwriteForm.no_overwrite} />
+					<Label for="overwrite-no-overwrite">下载时不覆盖已存在的文件</Label>
+				</div>
+				{#if overwriteForm.no_overwrite}
+					<div class="pl-6 space-y-2">
+						<Tooltip.Root>
+							<Tooltip.Trigger asChild>
+								<p class="text-muted-foreground text-sm cursor-help">细粒度控制：启用后可针对以下资源独立设置不覆盖策略</p>
+							</Tooltip.Trigger>
+							<Tooltip.Content class="max-w-xs">
+								<ul class="text-xs space-y-1 list-disc list-inside">
+									<li><strong>主开关关闭</strong>：所有文件都会被覆盖（细粒度无效）</li>
+									<li><strong>主开关开启 + 细粒度关闭</strong>：该类型文件会被覆盖</li>
+									<li><strong>主开关开启 + 细粒度开启</strong>：该类型文件不会被覆盖，跳过下载</li>
+								</ul>
+							</Tooltip.Content>
+						</Tooltip.Root>
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+							<div class="flex items-center space-x-2">
+								<Switch id="overwrite-video" bind:checked={overwriteForm.no_overwrite_video} />
+								<Label for="overwrite-video">视频 文件</Label>
+							</div>
+							<div class="flex items-center space-x-2">
+								<Switch id="overwrite-poster" bind:checked={overwriteForm.no_overwrite_poster} />
+								<Label for="overwrite-poster">封面 / fanart</Label>
+							</div>
+							<div class="flex items-center space-x-2">
+								<Switch id="overwrite-video-nfo" bind:checked={overwriteForm.no_overwrite_video_nfo} />
+								<Label for="overwrite-video-nfo">视频 NFO</Label>
+							</div>
+							<div class="flex items-center space-x-2">
+								<Switch id="overwrite-upper" bind:checked={overwriteForm.no_overwrite_upper} />
+								<Label for="overwrite-upper">Up 主头像 / 信息</Label>
+							</div>
+							<div class="flex items-center space-x-2">
+								<Switch id="overwrite-danmaku" bind:checked={overwriteForm.no_overwrite_danmaku} />
+								<Label for="overwrite-danmaku">弹幕</Label>
+							</div>
+							<div class="flex items-center space-x-2">
+								<Switch id="overwrite-subtitle" bind:checked={overwriteForm.no_overwrite_subtitle} />
+								<Label for="overwrite-subtitle">字幕</Label>
+							</div>
+						</div>
+					</div>
+				{/if}
+			</div>
+			<div class="mt-8 flex justify-end gap-3">
+				<Button variant="outline" onclick={() => (showOverwriteDialog = false)} disabled={overwriteSaving}>
+					取消
+				</Button>
+				<Button onclick={saveOverwriteSettings} disabled={overwriteSaving}>
+					{overwriteSaving ? '保存中...' : '保存'}
+				</Button>
+			</div>
+		</Dialog.Content>
+	</Dialog.Root>
 
 	<!-- 添加对话框 -->
 	<Dialog.Root bind:open={showAddDialog}>

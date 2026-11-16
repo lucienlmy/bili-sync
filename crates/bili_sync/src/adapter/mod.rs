@@ -77,6 +77,8 @@ pub trait VideoSource {
 
     fn rule(&self) -> &Option<Rule>;
 
+    fn skip_option(&self) -> &Option<String>;
+
     fn log_refresh_video_start(&self) {
         info!("开始扫描{}..", self.display_name());
     }
